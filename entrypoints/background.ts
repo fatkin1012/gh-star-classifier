@@ -10,7 +10,22 @@ import { addTagsToRepo, removeTagsFromRepo } from '../utils/tags';
 export default defineBackground(() => {
   console.log('[Star Classifier] Background service worker started');
 
-  // --- Periodic sync via alarms ---
+  // Open side panel when extension icon is clicked
+  browser.action.onClicked.addListener(async (tab) => {
+    // Try to open side panel for the current tab
+    if (browser.sidePanel) {
+      try {
+        // Open side panel for current tab (cast for cross-browser type compat)
+        await (browser.sidePanel as any).open({ tabId: tab.id });
+        // Clear badge when panel opens
+        await browser.action.setBadgeText({ text: '' });
+      } catch (err) {
+        console.error('[Star Classifier] Failed to open side panel:', err);
+      }
+    }
+  });
+
+  // ─── Periodic sync via alarms ───
   async function initAlarm() {
     const settings = await getSettings();
     if (settings.githubToken) {
@@ -41,7 +56,7 @@ export default defineBackground(() => {
 
   initAlarm();
 
-  // --- Handle messages from content script / popup ---
+  // ─── Handle messages from content script / popup / side panel ───
   browser.runtime.onMessage.addListener(async (message, sender) => {
     switch (message.type) {
       case 'SYNC_NOW': {
@@ -58,7 +73,6 @@ export default defineBackground(() => {
       }
 
       case 'CHECK_STARRED': {
-        // Content script asks: is this repo already in our DB?
         const { repoId } = message;
         const repo = await db.repos.get(repoId);
         return { exists: !!repo, tags: repo?.tags ?? [] };
@@ -101,10 +115,5 @@ export default defineBackground(() => {
       default:
         return { ok: false, error: `Unknown message type: ${message.type}` };
     }
-  });
-
-  // --- Clear badge when popup opens ---
-  browser.action.onClicked.addListener(async () => {
-    await browser.action.setBadgeText({ text: '' });
   });
 });

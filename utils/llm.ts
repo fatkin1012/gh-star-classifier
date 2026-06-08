@@ -47,6 +47,8 @@ export function getProviderDefaults(provider: LlmProvider): { model: string; bas
       return { model: 'claude-3-5-haiku-latest', baseUrl: 'https://api.anthropic.com/v1' };
     case 'ollama':
       return { model: 'llama3.2:3b', baseUrl: 'http://localhost:11434/v1' };
+    case 'deepseek':
+      return { model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' };
   }
 }
 
@@ -170,6 +172,7 @@ async function callLlm(prompt: string, config: LlmConfig): Promise<string> {
   switch (config.provider) {
     case 'openai':
     case 'openrouter':
+    case 'deepseek':
       return callOpenAI(prompt, config);
     case 'anthropic':
       return callAnthropic(prompt, config);
@@ -231,6 +234,7 @@ function parseSuggestion(raw: string): AiSuggestion {
       confidence: ['high', 'medium', 'low'].includes(parsed.confidence)
         ? parsed.confidence
         : 'low',
+      analyzedAt: Date.now(),
     };
   } catch {
     // Fallback: try to extract tags manually
@@ -242,6 +246,7 @@ function parseSuggestion(raw: string): AiSuggestion {
       tags,
       reasoning: 'Parsed from LLM output (fallback)',
       confidence: 'low',
+      analyzedAt: Date.now(),
     };
   }
 }

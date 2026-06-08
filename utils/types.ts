@@ -43,7 +43,7 @@ export interface AutoTagRule {
 /**
  * Extension settings.
  */
-export type LlmProvider = 'openai' | 'anthropic' | 'ollama' | 'openrouter';
+export type LlmProvider = 'openai' | 'anthropic' | 'ollama' | 'openrouter' | 'deepseek';
 
 export interface LlmSettings {
   provider: LlmProvider;

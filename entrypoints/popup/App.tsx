@@ -323,6 +323,7 @@ export default function PopupApp() {
                   <option value="openai">OpenAI</option>
                   <option value="openrouter">OpenRouter</option>
                   <option value="anthropic">Anthropic Claude</option>
+                  <option value="deepseek">DeepSeek</option>
                   <option value="ollama">Ollama (Local)</option>
                 </select>
               </div>

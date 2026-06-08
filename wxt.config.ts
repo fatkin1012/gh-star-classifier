@@ -14,6 +14,7 @@ export default defineConfig({
     permissions: [
       'storage',
       'alarms',
+      'sidepanel',
     ],
     host_permissions: [
       'https://api.github.com/*',
@@ -21,6 +22,9 @@ export default defineConfig({
     ],
     action: {
       default_title: 'Star Classifier',
+    },
+    side_panel: {
+      default_path: 'sidepanel.html',
     },
     options_ui: {
       page: 'options.html',
