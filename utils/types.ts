@@ -68,6 +68,8 @@ export interface AiSuggestion {
 }
 
 export interface AppSettings {
+  /** Dexie primary key (always 'main' for settings table) */
+  key?: string;
   githubToken: string | null;
   defaultTags: string[];
   autoClassifyEnabled: boolean;

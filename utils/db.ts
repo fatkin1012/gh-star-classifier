@@ -64,8 +64,9 @@ export async function getSettings(): Promise<AppSettings> {
   try {
     let s = await d.settings.get('main');
     if (!s) {
-      s = { ...DEFAULT_SETTINGS };
-      await d.settings.put(s, 'main');
+      // Must include 'key' property explicitly — Dexie schema is 'settings: key'
+      s = { key: 'main', ...DEFAULT_SETTINGS };
+      await d.settings.put(s);
       return s;
     }
     return {
@@ -74,7 +75,6 @@ export async function getSettings(): Promise<AppSettings> {
       llm: { ...DEFAULT_SETTINGS.llm, ...(s.llm ?? {}) },
     };
   } catch (err) {
-    // Log the actual error message, not just [object Object]
     const msg = err instanceof Error ? err.message : JSON.stringify(err);
     console.error('[DB] getSettings failed:', msg);
     console.warn('[DB] Falling back to default settings');
@@ -85,11 +85,11 @@ export async function getSettings(): Promise<AppSettings> {
 export async function updateSettings(partial: Partial<AppSettings>): Promise<AppSettings> {
   const d = getDb();
   const s = await getSettings();
-  const updated = { ...s, ...partial } as AppSettings;
+  const updated: AppSettings = { key: 'main', ...s, ...partial };
   if (partial.llm) {
     updated.llm = { ...s.llm, ...partial.llm };
   }
-  await d.settings.put(updated, 'main');
+  await d.settings.put(updated);
   return updated;
 }
 
