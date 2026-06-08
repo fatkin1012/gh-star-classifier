@@ -16,18 +16,16 @@ export class StarDB extends Dexie {
   repos!: Table<TaggedRepo, number>;
   rules!: Table<AutoTagRule, number>;
   settings!: Table<AppSettings, string>;
-  /** Cached AI analysis results */
   aiCache!: Table<AiCacheEntry, number>;
 
   constructor() {
     super('GitHubStarClassifier');
-    this.version(1).stores({
-      repos: 'id, name, fullName, language, tags, *tags, starredAt',
-      rules: '++id, name, matchType',
-      settings: 'key',
-    });
+    
+    // Single version with all tables.
+    // NOTE: Use only '*tags' (multi-entry), not 'tags' + '*tags' which confuses Dexie.
+    // This also auto-creates the aiCache table for existing v1 users.
     this.version(2).stores({
-      repos: 'id, name, fullName, language, tags, *tags, starredAt',
+      repos: 'id, name, fullName, language, *tags, starredAt',
       rules: '++id, name, matchType',
       settings: 'key',
       aiCache: 'repoId',
@@ -35,52 +33,76 @@ export class StarDB extends Dexie {
   }
 }
 
-export const db = new StarDB();
+let _dbInstance: StarDB | null = null;
+let _dbError: Error | null = null;
 
-/** Ensure settings record exists, merging defaults for any missing fields */
+function getDb(): StarDB {
+  if (!_dbInstance) {
+    try {
+      _dbInstance = new StarDB();
+    } catch (err) {
+      _dbError = err instanceof Error ? err : new Error(String(err));
+      console.error('[DB] Failed to create Dexie instance:', _dbError);
+      throw _dbError;
+    }
+  }
+  return _dbInstance;
+}
+
+/** Check if DB is operational */
+export function isDbReady(): boolean {
+  return _dbInstance !== null && _dbError === null;
+}
+
+export const db = getDb();
+
+// ─── Settings ──────────────────────────────────────────────
+
+/** Ensure settings record exists, merging defaults */
 export async function getSettings(): Promise<AppSettings> {
+  const d = getDb();
   try {
-    let s = await db.settings.get('main');
+    let s = await d.settings.get('main');
     if (!s) {
       s = { ...DEFAULT_SETTINGS };
-      await db.settings.put(s, 'main');
+      await d.settings.put(s, 'main');
       return s;
     }
-    // Simple merge for backward compatibility
-    const result: AppSettings = {
+    return {
       ...DEFAULT_SETTINGS,
       ...s,
       llm: { ...DEFAULT_SETTINGS.llm, ...(s.llm ?? {}) },
     };
-    return result;
   } catch (err) {
-    // If DB fails, return defaults
-    console.error('[getSettings] DB error, using defaults:', err);
+    // Log the actual error message, not just [object Object]
+    const msg = err instanceof Error ? err.message : JSON.stringify(err);
+    console.error('[DB] getSettings failed:', msg);
+    console.warn('[DB] Falling back to default settings');
     return { ...DEFAULT_SETTINGS };
   }
 }
 
 export async function updateSettings(partial: Partial<AppSettings>): Promise<AppSettings> {
+  const d = getDb();
   const s = await getSettings();
   const updated = { ...s, ...partial } as AppSettings;
-  // Deep merge llm if provided
   if (partial.llm) {
     updated.llm = { ...s.llm, ...partial.llm };
   }
-  await db.settings.put(updated, 'main');
+  await d.settings.put(updated, 'main');
   return updated;
 }
 
 /** Bulk upsert repos from GitHub API results */
 export async function upsertRepos(repos: TaggedRepo[]): Promise<void> {
-  await db.transaction('rw', db.repos, async () => {
+  const d = getDb();
+  await d.transaction('rw', d.repos, async () => {
     for (const r of repos) {
-      const existing = await db.repos.get(r.id);
+      const existing = await d.repos.get(r.id);
       if (existing) {
-        // Preserve existing tags, update metadata
-        await db.repos.put({ ...r, tags: existing.tags, lastSyncedAt: Date.now() }, r.id);
+        await d.repos.put({ ...r, tags: existing.tags, lastSyncedAt: Date.now() }, r.id);
       } else {
-        await db.repos.put({ ...r, lastSyncedAt: Date.now() }, r.id);
+        await d.repos.put({ ...r, lastSyncedAt: Date.now() }, r.id);
       }
     }
   });
@@ -88,40 +110,40 @@ export async function upsertRepos(repos: TaggedRepo[]): Promise<void> {
 
 // ─── AI Cache ──────────────────────────────────────────────
 
-/** Get cached AI suggestion for a repo */
 export async function getAiCache(repoId: number): Promise<AiSuggestion | null> {
-  const entry = await db.aiCache.get(repoId);
+  const d = getDb();
+  const entry = await d.aiCache.get(repoId);
   return entry?.suggestion ?? null;
 }
 
-/** Store AI suggestion cache */
 export async function setAiCache(repoId: number, suggestion: AiSuggestion): Promise<void> {
-  await db.aiCache.put({ repoId, suggestion }, repoId);
+  const d = getDb();
+  await d.aiCache.put({ repoId, suggestion }, repoId);
 }
 
-/** Clear stale AI cache entries (older than 7 days) */
 export async function cleanAiCache(): Promise<void> {
+  const d = getDb();
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const all = await db.aiCache.toArray();
+  const all = await d.aiCache.toArray();
   for (const entry of all) {
     if (entry.suggestion.analyzedAt < cutoff) {
-      await db.aiCache.delete(entry.repoId);
+      await d.aiCache.delete(entry.repoId);
     }
   }
 }
 
-/** Get repos with no AI analysis yet */
 export async function getUnanalyzedRepos(): Promise<TaggedRepo[]> {
-  const repos = await db.repos.toArray();
-  const analyzedIds = new Set((await db.aiCache.toArray()).map((e) => e.repoId));
+  const d = getDb();
+  const repos = await d.repos.toArray();
+  const analyzedIds = new Set((await d.aiCache.toArray()).map((e) => e.repoId));
   return repos.filter((r) => !analyzedIds.has(r.id));
 }
 
 // ─── Auto rules ─────────────────────────────────────────────
 
-/** Apply auto-classify rules to a repo, return tags to add */
 export async function applyAutoRules(repo: TaggedRepo): Promise<string[]> {
-  const rules = await db.rules.toArray();
+  const d = getDb();
+  const rules = await d.rules.toArray();
   const matched = new Set<string>();
   for (const rule of rules) {
     let hit = false;

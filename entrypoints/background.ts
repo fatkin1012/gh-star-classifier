@@ -106,20 +106,6 @@ export default defineBackground(() => {
           return { ok: true };
         }
 
-        case 'OPEN_SIDE_PANEL': {
-          // Open side panel from user gesture context (popup click)
-          try {
-            const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-            if (tab?.id) {
-              await (browser.sidePanel as any).open({ tabId: tab.id });
-            }
-            return { ok: true };
-          } catch (err) {
-            console.error('[Star Classifier] Side panel open failed:', err);
-            return { ok: false, error: String(err) };
-          }
-        }
-
         default:
           return { ok: false, error: `Unknown message type: ${message.type}` };
       }

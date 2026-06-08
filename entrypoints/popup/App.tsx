@@ -186,9 +186,15 @@ export default function PopupApp() {
 
   const handleOpenSidePanel = async () => {
     try {
-      await browser.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' });
+      // Must call directly from popup (user gesture context), not via background message
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        await (browser.sidePanel as any).open({ tabId: tab.id });
+      }
     } catch (err) {
-      console.error('Failed to open side panel:', err);
+      // If sidePanel.open fails, try alternative: open options page
+      console.warn('Side panel not available, opening options page:', err);
+      await browser.tabs.create({ url: 'options.html' });
     }
   };
 
