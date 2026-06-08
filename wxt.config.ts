@@ -14,7 +14,6 @@ export default defineConfig({
     permissions: [
       'storage',
       'alarms',
-      'sidepanel',
     ],
     host_permissions: [
       'https://api.github.com/*',
