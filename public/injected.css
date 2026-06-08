@@ -1,0 +1,27 @@
+/* Styles injected into GitHub pages by content script */
+
+.gh-sc-tag-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+}
+
+.gh-sc-tag-btn:hover {
+  background-color: #f3f4f6 !important;
+}
+
+.gh-sc-popup input:focus {
+  outline: 2px solid #1a56db !important;
+  outline-offset: -1px !important;
+  border-color: transparent !important;
+}
+
+.gh-sc-tag {
+  transition: all 0.15s ease;
+}
+
+.gh-sc-tag:hover {
+  opacity: 0.85;
+}
