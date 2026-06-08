@@ -43,6 +43,30 @@ export interface AutoTagRule {
 /**
  * Extension settings.
  */
+export type LlmProvider = 'openai' | 'anthropic' | 'ollama' | 'openrouter';
+
+export interface LlmSettings {
+  provider: LlmProvider;
+  apiKey: string;
+  model: string;
+  baseUrl: string;
+  /** Custom system prompt for classification */
+  customPrompt: string;
+  /** Max repos to analyze in one batch */
+  batchSize: number;
+  /** If true, auto-analyze new stars during sync */
+  autoClassifyNew: boolean;
+}
+
+/** Cached AI suggestion for a repo (stored in-memory, not persisted to DB directly) */
+export interface AiSuggestion {
+  tags: string[];
+  reasoning: string;
+  confidence: 'high' | 'medium' | 'low';
+  /** When this suggestion was generated */
+  analyzedAt: number;
+}
+
 export interface AppSettings {
   githubToken: string | null;
   defaultTags: string[];
@@ -50,7 +74,19 @@ export interface AppSettings {
   syncIntervalMinutes: number;
   /** Tags to auto-apply to all newly detected stars */
   newStarDefaultTags: string[];
+  /** LLM classifier settings */
+  llm: LlmSettings;
 }
+
+export const DEFAULT_LLM_SETTINGS: LlmSettings = {
+  provider: 'openai',
+  apiKey: '',
+  model: '',
+  baseUrl: '',
+  customPrompt: '',
+  batchSize: 5,
+  autoClassifyNew: false,
+};
 
 export const DEFAULT_SETTINGS: AppSettings = {
   githubToken: null,
@@ -58,4 +94,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoClassifyEnabled: true,
   syncIntervalMinutes: 30,
   newStarDefaultTags: [],
+  llm: { ...DEFAULT_LLM_SETTINGS },
 };

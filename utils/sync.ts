@@ -2,8 +2,10 @@
 // Background sync — detect new stars and auto-classify
 // ============================================================
 
-import { db, getSettings, applyAutoRules } from './db';
+import { db, getSettings, applyAutoRules, setAiCache } from './db';
 import { fetchAllStars } from './github';
+import { analyzeRepo, fetchReadmeSummary } from './llm';
+import type { TaggedRepo } from './types';
 
 /**
  * Full sync: fetch all stars from GitHub and merge into DB.
@@ -58,10 +60,31 @@ export async function fullSync(token: string): Promise<{
     await db.repos.put({ ...raw, tags, lastSyncedAt: Date.now() }, raw.id);
   }
 
+  // ─── LLM auto-classify for new repos ───────────────────
+  if (settings.llm.autoClassifyNew && settings.llm.apiKey && newCount > 0) {
+    for (const raw of rawRepos) {
+      const tagged: TaggedRepo = { ...raw, tags: [], lastSyncedAt: 0 };
+      try {
+        const readmeSummary = await fetchReadmeSummary(tagged);
+        const suggestion = await analyzeRepo(tagged, readmeSummary, settings.llm);
+        if (suggestion.tags.length > 0) {
+          await setAiCache(raw.id, { ...suggestion, analyzedAt: Date.now() });
+          const repo = await db.repos.get(raw.id);
+          if (repo) {
+            const merged = new Set([...repo.tags, ...suggestion.tags]);
+            await db.repos.update(raw.id, { tags: [...merged] });
+          }
+        }
+      } catch (err) {
+        console.error(`[LLM sync] Failed for ${raw.fullName}:`, err);
+      }
+    }
+  }
+
   return {
     total: rawRepos.length,
     new: newCount,
-    autoTagged,
+    autoTagged: autoTagged,
   };
 }
 

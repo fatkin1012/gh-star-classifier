@@ -3,13 +3,21 @@
 // ============================================================
 
 import Dexie, { type Table } from 'dexie';
-import type { TaggedRepo, AutoTagRule, AppSettings } from './types';
+import type { TaggedRepo, AutoTagRule, AppSettings, AiSuggestion } from './types';
 import { DEFAULT_SETTINGS } from './types';
+
+/** Stored AI analysis result for a repo */
+export interface AiCacheEntry {
+  repoId: number;
+  suggestion: AiSuggestion;
+}
 
 export class StarDB extends Dexie {
   repos!: Table<TaggedRepo, number>;
   rules!: Table<AutoTagRule, number>;
   settings!: Table<AppSettings, string>;
+  /** Cached AI analysis results */
+  aiCache!: Table<AiCacheEntry, number>;
 
   constructor() {
     super('GitHubStarClassifier');
@@ -18,25 +26,45 @@ export class StarDB extends Dexie {
       rules: '++id, name, matchType',
       settings: 'key',
     });
+    this.version(2).stores({
+      repos: 'id, name, fullName, language, tags, *tags, starredAt',
+      rules: '++id, name, matchType',
+      settings: 'key',
+      aiCache: 'repoId',
+    });
   }
 }
 
 export const db = new StarDB();
 
-/** Ensure settings record exists */
+/** Ensure settings record exists, merging defaults for any missing fields */
 export async function getSettings(): Promise<AppSettings> {
   let s = await db.settings.get('main');
   if (!s) {
-    // DEFAULT_SETTINGS already imported at top
     s = { ...DEFAULT_SETTINGS };
     await db.settings.put(s, 'main');
+    return s;
   }
-  return s;
+  // Merge with defaults for backward compatibility (new fields after upgrades)
+  const merged: AppSettings = { ...DEFAULT_SETTINGS, ...s, llm: { ...DEFAULT_SETTINGS.llm, ...(s.llm ?? {}) } };
+  // Only persist if something actually changed
+  const persisted: AppSettings = { ...DEFAULT_SETTINGS, ...s };
+  if (s.llm) persisted.llm = s.llm;
+  // Check for deep equality
+  const chk = (a: AppSettings, b: AppSettings) => JSON.stringify(a) === JSON.stringify(b);
+  if (!chk(merged, persisted)) {
+    await db.settings.put(merged, 'main');
+  }
+  return merged;
 }
 
 export async function updateSettings(partial: Partial<AppSettings>): Promise<AppSettings> {
   const s = await getSettings();
-  const updated = { ...s, ...partial };
+  const updated = { ...s, ...partial } as AppSettings;
+  // Deep merge llm if provided
+  if (partial.llm) {
+    updated.llm = { ...s.llm, ...partial.llm };
+  }
   await db.settings.put(updated, 'main');
   return updated;
 }
@@ -55,6 +83,39 @@ export async function upsertRepos(repos: TaggedRepo[]): Promise<void> {
     }
   });
 }
+
+// ─── AI Cache ──────────────────────────────────────────────
+
+/** Get cached AI suggestion for a repo */
+export async function getAiCache(repoId: number): Promise<AiSuggestion | null> {
+  const entry = await db.aiCache.get(repoId);
+  return entry?.suggestion ?? null;
+}
+
+/** Store AI suggestion cache */
+export async function setAiCache(repoId: number, suggestion: AiSuggestion): Promise<void> {
+  await db.aiCache.put({ repoId, suggestion }, repoId);
+}
+
+/** Clear stale AI cache entries (older than 7 days) */
+export async function cleanAiCache(): Promise<void> {
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const all = await db.aiCache.toArray();
+  for (const entry of all) {
+    if (entry.suggestion.analyzedAt < cutoff) {
+      await db.aiCache.delete(entry.repoId);
+    }
+  }
+}
+
+/** Get repos with no AI analysis yet */
+export async function getUnanalyzedRepos(): Promise<TaggedRepo[]> {
+  const repos = await db.repos.toArray();
+  const analyzedIds = new Set((await db.aiCache.toArray()).map((e) => e.repoId));
+  return repos.filter((r) => !analyzedIds.has(r.id));
+}
+
+// ─── Auto rules ─────────────────────────────────────────────
 
 /** Apply auto-classify rules to a repo, return tags to add */
 export async function applyAutoRules(repo: TaggedRepo): Promise<string[]> {

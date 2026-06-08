@@ -8,9 +8,10 @@ interface RepoListProps {
   onAddTags: (repoId: number, tags: string[]) => void;
   onRemoveTag: (repoId: number, tag: string) => void;
   onBulkTag: (repoIds: number[], tags: string[]) => void;
+  onAiSuggest?: (repoId: number, tags: string[]) => void;
 }
 
-export default function RepoList({ repos, allTags, onAddTags, onRemoveTag, onBulkTag }: RepoListProps) {
+export default function RepoList({ repos, allTags, onAddTags, onRemoveTag, onBulkTag, onAiSuggest }: RepoListProps) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkTagInput, setBulkTagInput] = useState('');
 
@@ -96,6 +97,7 @@ export default function RepoList({ repos, allTags, onAddTags, onRemoveTag, onBul
               onRemoveTag={onRemoveTag}
               selected={selected.has(repo.id)}
               onSelect={toggleSelect}
+              onAiSuggest={onAiSuggest}
             />
           ))}
         </div>
