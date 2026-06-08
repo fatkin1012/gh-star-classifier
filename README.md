@@ -9,6 +9,7 @@ A browser extension that syncs your GitHub stars, lets you tag them with custom 
 - **Sync stars** — Pull all your starred repos from GitHub with one click
 - **Tag system** — Add/remove tags on any repo, search and filter by tag
 - **Auto-classify rules** — Define rules (by language, topic, or keyword) to auto-tag new stars
+- **🤖 AI classification** — Use LLM (OpenAI, Anthropic, Ollama, OpenRouter) to analyze READMEs and suggest tags
 - **Bulk tag** — Select multiple repos and tag them at once
 - **GitHub page integration** — Tag UI injected into any GitHub repo page via content script
 - **Search** — Search by repo name, description, language, or tags
