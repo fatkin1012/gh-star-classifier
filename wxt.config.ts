@@ -14,6 +14,7 @@ export default defineConfig({
     permissions: [
       'storage',
       'alarms',
+      'tabs',
     ],
     host_permissions: [
       'https://api.github.com/*',

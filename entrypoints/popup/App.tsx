@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { HiCog6Tooth, HiSparkles } from 'react-icons/hi2';
+import { HiCog6Tooth, HiSparkles, HiBars3CenterLeft } from 'react-icons/hi2';
 import { db, getSettings, updateSettings, getAiCache, setAiCache, getUnanalyzedRepos } from '../../utils/db';
 import { getAllTags, addTagsToRepo, removeTagsFromRepo, bulkTagRepos } from '../../utils/tags';
 import { fullSync } from '../../utils/sync';
@@ -184,6 +184,14 @@ export default function PopupApp() {
     setTimeout(() => setTokenSaved(false), 2000);
   };
 
+  const handleOpenSidePanel = async () => {
+    try {
+      await browser.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' });
+    } catch (err) {
+      console.error('Failed to open side panel:', err);
+    }
+  };
+
   useEffect(() => {
     getLastSync().then(setLastSyncedAt);
   }, [getLastSync]);
@@ -193,6 +201,12 @@ export default function PopupApp() {
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
         <h1 className="font-bold text-base text-gray-800">⭐ Star Classifier</h1>
+        <button onClick={handleOpenSidePanel}
+          className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors mr-2"
+          title="Open in Side Panel">
+          <HiBars3CenterLeft className="w-4 h-4" />
+          Side Panel
+        </button>
         <div className="flex gap-1">
           <button
             onClick={() => setTab('repos')}
