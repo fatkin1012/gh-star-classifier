@@ -8,23 +8,40 @@ import { fullSync } from '../utils/sync';
 import { addTagsToRepo, removeTagsFromRepo } from '../utils/tags';
 
 export default defineBackground(() => {
+  // Self-healing: restart alarms on service worker wake
   console.log('[Star Classifier] Background service worker started');
+
+  // Global one-time error handler for unhandled rejections
+  self.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    const msg = reason instanceof Error ? reason.message : typeof reason === 'object' ? JSON.stringify(reason) : String(reason);
+    console.warn('[Star Classifier] Unhandled rejection:', msg);
+    // Prevent Chrome from logging the error
+    event.preventDefault();
+  });
 
   // ─── Init alarms with error handling ───
   async function initAlarm() {
     try {
+      if (typeof browser.alarms === 'undefined' || typeof browser.alarms.create !== 'function') {
+        console.warn('[Star Classifier] alarms API not available, skipping periodic sync');
+        return;
+      }
       const settings = await getSettings();
-      if (settings.githubToken) {
+      if (settings.githubToken && settings.syncIntervalMinutes >= 1) {
         await browser.alarms.create('sync-stars', {
-          periodInMinutes: settings.syncIntervalMinutes,
+          periodInMinutes: Math.max(1, settings.syncIntervalMinutes),
         });
         console.log(`[Star Classifier] Sync alarm set for every ${settings.syncIntervalMinutes} minutes`);
       }
     } catch (err) {
-      console.error('[Star Classifier] Failed to init alarm:', err);
+      // Stringify properly since some errors are plain objects or DOMExceptions
+      const msg = err instanceof Error ? err.message : typeof err === 'object' ? JSON.stringify(err) : String(err);
+      console.error('[Star Classifier] Failed to init alarm:', msg);
     }
   }
-  initAlarm().catch((err) => console.error('[Star Classifier] initAlarm error:', err));
+  // Fire and forget - errors handled within
+  initAlarm();
 
   // ─── Periodic sync ───
   browser.alarms.onAlarm.addListener(async (alarm) => {

@@ -39,23 +39,25 @@ export const db = new StarDB();
 
 /** Ensure settings record exists, merging defaults for any missing fields */
 export async function getSettings(): Promise<AppSettings> {
-  let s = await db.settings.get('main');
-  if (!s) {
-    s = { ...DEFAULT_SETTINGS };
-    await db.settings.put(s, 'main');
-    return s;
+  try {
+    let s = await db.settings.get('main');
+    if (!s) {
+      s = { ...DEFAULT_SETTINGS };
+      await db.settings.put(s, 'main');
+      return s;
+    }
+    // Simple merge for backward compatibility
+    const result: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      ...s,
+      llm: { ...DEFAULT_SETTINGS.llm, ...(s.llm ?? {}) },
+    };
+    return result;
+  } catch (err) {
+    // If DB fails, return defaults
+    console.error('[getSettings] DB error, using defaults:', err);
+    return { ...DEFAULT_SETTINGS };
   }
-  // Merge with defaults for backward compatibility (new fields after upgrades)
-  const merged: AppSettings = { ...DEFAULT_SETTINGS, ...s, llm: { ...DEFAULT_SETTINGS.llm, ...(s.llm ?? {}) } };
-  // Only persist if something actually changed
-  const persisted: AppSettings = { ...DEFAULT_SETTINGS, ...s };
-  if (s.llm) persisted.llm = s.llm;
-  // Check for deep equality
-  const chk = (a: AppSettings, b: AppSettings) => JSON.stringify(a) === JSON.stringify(b);
-  if (!chk(merged, persisted)) {
-    await db.settings.put(merged, 'main');
-  }
-  return merged;
 }
 
 export async function updateSettings(partial: Partial<AppSettings>): Promise<AppSettings> {
