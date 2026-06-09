@@ -312,16 +312,20 @@ export function classifyRepo(repo: {
   for (const [catKey, rule] of Object.entries(CLASSIFY_RULES)) {
     let score = 0;
 
-    // topics 強匹配 → +3 each
+    // topics 強匹配 → +3 each (exact match)
+    // weak partial match → +1 each (substring overlap, but not exact)
     for (const topic of topics) {
       if (rule.strong.includes(topic)) {
         score += 3;
-      }
-      // topics 部分匹配
-      for (const kw of rule.strong) {
-        if (topic.includes(kw) || kw.includes(topic)) {
-          score += 2;
-          break;
+      } else {
+        // Only try partial match when exact match didn't hit.
+        // This avoids double-counting (e.g. topic "cli" matching
+        // both exact and partial on the same keyword).
+        for (const kw of rule.strong) {
+          if (topic.includes(kw) || kw.includes(topic)) {
+            score += 1;
+            break;
+          }
         }
       }
     }
@@ -347,9 +351,9 @@ export function classifyRepo(repo: {
       }
     }
 
-    // 反匹配 → -3 each
+    // 反匹配 → -3 each（支持 substring 匹配 topics）
     for (const kw of rule.anti) {
-      if (desc.includes(kw) || (topics.includes(kw))) {
+      if (desc.includes(kw) || topics.some((t) => t.includes(kw) || kw.includes(t))) {
         score -= 3;
       }
     }

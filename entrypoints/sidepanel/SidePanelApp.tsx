@@ -535,9 +535,15 @@ function RepoRow({
           {/* v1.1: Category badge */}
           {catInfo && (
             <div className="flex items-center gap-1 mt-1">
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-800">
-                {catInfo.icon} {subLabel || catInfo.label.split('/')[0].trim()}
-              </span>
+              <TagBadge
+                tag={repo.category}
+                category={repo.category}
+                subCategory={repo.subCategory}
+                size="sm"
+              />
+              {subLabel && (
+                <span className="text-[10px] text-gray-400">→ {subLabel}</span>
+              )}
             </div>
           )}
 

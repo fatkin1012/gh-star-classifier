@@ -75,7 +75,7 @@ export async function fullSync(token: string): Promise<{
   // ─── LLM auto-classify for new repos ───────────────────
   if (settings.llm.autoClassifyNew && settings.llm.apiKey && newCount > 0) {
     for (const raw of rawRepos) {
-      const tagged: TaggedRepo = { ...raw, tags: [], lastSyncedAt: 0 };
+      const tagged: TaggedRepo = { ...raw, tags: [], category: category || '', subCategory: subCategory || '', lastSyncedAt: 0 };
       try {
         const readmeSummary = await fetchReadmeSummary(tagged);
         const suggestion = await analyzeRepo(tagged, readmeSummary, settings.llm);
