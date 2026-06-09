@@ -5,6 +5,7 @@ import TagBadge from './TagBadge';
 import TagInput from './TagInput';
 import { getSettings, getAiCache, setAiCache } from '../utils/db';
 import { analyzeRepo, fetchReadmeSummary } from '../utils/llm';
+import { getCategoryInfo, getSubCategoryLabel } from '../utils/classify';
 
 interface RepoCardProps {
   repo: TaggedRepo;
@@ -123,8 +124,33 @@ export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, select
             <p className="text-xs text-gray-600 mt-1 line-clamp-2">{repo.description}</p>
           )}
 
+          {/* v1.1: Category badge */}
+          {repo.category && repo.category !== 'uncategorized' ? (
+            (() => {
+              const catInfo = getCategoryInfo(repo.category);
+              const subLabel = repo.subCategory ? getSubCategoryLabel(repo.category, repo.subCategory) : null;
+              return (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <TagBadge
+                    tag={repo.category}
+                    category={repo.category}
+                    subCategory={repo.subCategory}
+                    size="sm"
+                  />
+                  {subLabel && (
+                    <span className="text-[11px] text-gray-400">→ {subLabel}</span>
+                  )}
+                </div>
+              );
+            })()
+          ) : repo.category === 'uncategorized' ? (
+            <div className="mt-1.5">
+              <TagBadge tag="uncategorized" category="uncategorized" size="sm" />
+            </div>
+          ) : null}
+
           {/* Tags */}
-          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
             {repo.tags.map((tag) => (
               <TagBadge
                 key={tag}

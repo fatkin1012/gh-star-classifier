@@ -5,6 +5,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { TaggedRepo, AutoTagRule, AppSettings, AiSuggestion } from './types';
 import { DEFAULT_SETTINGS } from './types';
+import { classifyRepo } from './classify';
 
 /** Stored AI analysis result for a repo */
 export interface AiCacheEntry {
@@ -21,14 +22,44 @@ export class StarDB extends Dexie {
   constructor() {
     super('GitHubStarClassifier');
     
-    // Single version with all tables.
-    // NOTE: Use only '*tags' (multi-entry), not 'tags' + '*tags' which confuses Dexie.
-    // This also auto-creates the aiCache table for existing v1 users.
+    // v1: initial schema
+    this.version(1).stores({
+      repos: 'id, name, fullName, language, starredAt',
+      rules: '++id, name, matchType',
+      settings: 'key',
+    });
+
+    // v2: add tags index, aiCache (current production)
     this.version(2).stores({
       repos: 'id, name, fullName, language, *tags, starredAt',
       rules: '++id, name, matchType',
       settings: 'key',
       aiCache: 'repoId',
+    });
+
+    // v3: add category / subCategory for 5-category classification
+    this.version(3).stores({
+      repos: 'id, name, fullName, language, *tags, starredAt, category, subCategory',
+      rules: '++id, name, matchType',
+      settings: 'key',
+      aiCache: 'repoId',
+    }).upgrade(async (tx) => {
+      const repos = await tx.table('repos').toArray();
+      for (const repo of repos) {
+        if (!repo.category) {
+          const result = classifyRepo({
+            name: repo.name || '',
+            fullName: repo.fullName || '',
+            description: repo.description || '',
+            language: repo.language || '',
+            topics: repo.topics || [],
+          });
+          await tx.table('repos').update(repo.id, {
+            category: result.category,
+            subCategory: result.subCategory,
+          });
+        }
+      }
     });
   }
 }
@@ -130,6 +161,34 @@ export async function cleanAiCache(): Promise<void> {
       await d.aiCache.delete(entry.repoId);
     }
   }
+}
+
+export async function getReposByCategory(category: string): Promise<TaggedRepo[]> {
+  const d = getDb();
+  const all = await d.repos.where('category').equals(category).toArray();
+  return all.sort((a, b) => b.stars - a.stars);
+}
+
+export async function getReposBySubCategory(category: string, subCategory: string): Promise<TaggedRepo[]> {
+  const d = getDb();
+  const all = await d.repos.filter((r) => r.category === category && r.subCategory === subCategory).toArray();
+  return all.sort((a, b) => b.stars - a.stars);
+}
+
+export async function getCategoryStats(): Promise<{ categoryCounts: Record<string, number>; uncategorized: number }> {
+  const d = getDb();
+  const all = await d.repos.toArray();
+  const counts: Record<string, number> = {};
+  let uncategorized = 0;
+  for (const r of all) {
+    const cat = r.category || 'uncategorized';
+    if (cat === 'uncategorized') {
+      uncategorized++;
+    } else {
+      counts[cat] = (counts[cat] || 0) + 1;
+    }
+  }
+  return { categoryCounts: counts, uncategorized };
 }
 
 export async function getUnanalyzedRepos(): Promise<TaggedRepo[]> {

@@ -22,9 +22,13 @@ export interface StarredRepo {
 /**
  * Repo stored in IndexedDB with user-assigned tags.
  * `id` matches GitHub repo id so we can upsert.
+ * 
+ * v1.1: Added category / subCategory for 5-category auto-classification.
  */
 export interface TaggedRepo extends StarredRepo {
   tags: string[];
+  category: string;       // v1.1: 主分類 key (e.g. "applications-tools")
+  subCategory: string;    // v1.1: 子分類 key (e.g. "cli-tool")
   lastSyncedAt: number; // epoch ms
 }
 

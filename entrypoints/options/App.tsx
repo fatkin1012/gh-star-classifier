@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { HiPlus, HiTrash } from 'react-icons/hi2';
-import { db, getSettings, updateSettings } from '../../utils/db';
+import { db, getSettings, updateSettings, getCategoryStats } from '../../utils/db';
+import { CATEGORIES } from '../../utils/classify';
 import type { AutoTagRule } from '../../utils/types';
 
 export default function OptionsApp() {
@@ -14,9 +15,16 @@ export default function OptionsApp() {
   const [newMatchValue, setNewMatchValue] = useState('');
   const [newTags, setNewTags] = useState('');
 
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
+  const [uncategorizedCount, setUncategorizedCount] = useState(0);
+
   useEffect(() => {
     loadRules();
     getSettings().then((s) => setToken(s.githubToken ?? ''));
+    getCategoryStats().then((s) => {
+      setCategoryCounts(s.categoryCounts);
+      setUncategorizedCount(s.uncategorized);
+    });
   }, []);
 
   async function loadRules() {
@@ -79,6 +87,43 @@ export default function OptionsApp() {
         </div>
         <p className="text-xs text-gray-500">Token with <code>repo</code> and <code>read:user</code> scopes</p>
       </section>
+
+      {/* v1.1: Classification Overview */}
+      {Object.keys(categoryCounts).length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold text-gray-700">📂 Auto-Classification (v1.1)</h2>
+          <p className="text-xs text-gray-500">
+            Repos are auto-classified into 5 standard categories during every sync.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {CATEGORIES.map((cat) => {
+              const count = categoryCounts[cat.key] || 0;
+              return (
+                <div key={cat.key} className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span>{cat.icon}</span>
+                    <span className="text-sm font-medium text-gray-700">{cat.label}</span>
+                    <span className="text-xs text-gray-400 ml-auto">{count} repos</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {cat.subCategories.map((sub) => (
+                      <span key={sub.key} className="text-[10px] text-gray-400 bg-white px-1.5 py-0.5 rounded-full border border-gray-200">
+                        {sub.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {uncategorizedCount > 0 && (
+              <div className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="text-sm font-medium text-gray-500">❓ Uncategorized</div>
+                <div className="text-xs text-gray-400 mt-0.5">{uncategorizedCount} repos</div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Auto-classify Rules */}
       <section className="space-y-3">
@@ -178,7 +223,7 @@ export default function OptionsApp() {
 
       {/* Footer */}
       <p className="text-xs text-gray-400 text-center pt-4 border-t border-gray-100">
-        GitHub Star Classifier v1.0.0
+        GitHub Star Classifier v1.1.0
       </p>
     </div>
   );

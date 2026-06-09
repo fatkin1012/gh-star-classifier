@@ -1,9 +1,13 @@
 import { HiXMark } from 'react-icons/hi2';
+import { getCategoryInfo } from '../utils/classify';
 
 interface TagBadgeProps {
   tag: string;
   onRemove?: (tag: string) => void;
   size?: 'sm' | 'md';
+  // Category badge variant
+  category?: string;    // category key for styled category badge
+  subCategory?: string; // optional sub-category key
 }
 
 const COLOR_PALETTE = [
@@ -19,6 +23,15 @@ const COLOR_PALETTE = [
   'bg-rose-100 text-rose-800',
 ];
 
+const CATEGORY_COLORS: Record<string, string> = {
+  'applications-tools': 'bg-green-100 text-green-800',
+  'libraries-frameworks': 'bg-blue-100 text-blue-800',
+  'boilerplates-starters': 'bg-orange-100 text-orange-800',
+  'awesome-lists-tutorials': 'bg-pink-100 text-pink-800',
+  'scripts-dotfiles': 'bg-purple-100 text-purple-800',
+  'uncategorized': 'bg-gray-100 text-gray-500',
+};
+
 function getColor(tag: string): string {
   let hash = 0;
   for (let i = 0; i < tag.length; i++) {
@@ -27,13 +40,27 @@ function getColor(tag: string): string {
   return COLOR_PALETTE[Math.abs(hash) % COLOR_PALETTE.length];
 }
 
-export default function TagBadge({ tag, onRemove, size = 'md' }: TagBadgeProps) {
-  const color = getColor(tag);
+export default function TagBadge({ tag, category, subCategory, onRemove, size = 'sm' }: TagBadgeProps) {
+  let color: string;
+
+  if (category) {
+    color = CATEGORY_COLORS[category] || 'bg-gray-100 text-gray-500';
+  } else {
+    color = getColor(tag);
+  }
+
   const sizeClass = size === 'sm' ? 'text-xs px-1.5 py-0.5' : 'text-sm px-2 py-0.5';
+  const catInfo = category ? getCategoryInfo(category) : null;
+  const displayText = subCategory
+    ? subCategory.replace(/-/g, ' ')
+    : (catInfo ? `${catInfo.icon} ${catInfo.label.split('/')[0].trim()}` : tag);
 
   return (
     <span className={`inline-flex items-center gap-1 rounded-full font-medium ${color} ${sizeClass}`}>
-      {tag}
+      {catInfo?.icon && !subCategory && (
+        <span className="text-[10px]">{catInfo.icon}</span>
+      )}
+      {displayText}
       {onRemove && (
         <button
           onClick={(e) => {
@@ -49,3 +76,5 @@ export default function TagBadge({ tag, onRemove, size = 'md' }: TagBadgeProps) 
     </span>
   );
 }
+
+export { CATEGORY_COLORS };

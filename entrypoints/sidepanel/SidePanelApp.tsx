@@ -3,10 +3,11 @@ import {
   HiStar, HiCog6Tooth, HiSparkles, HiMagnifyingGlass,
   HiFunnel, HiArrowPath, HiCheckCircle, HiTag, HiBars3,
 } from 'react-icons/hi2';
-import { db, getSettings, updateSettings, getAiCache, setAiCache } from '../../utils/db';
+import { db, getSettings, updateSettings, getAiCache, setAiCache, getCategoryStats } from '../../utils/db';
 import { getAllTags, addTagsToRepo, removeTagsFromRepo, bulkTagRepos } from '../../utils/tags';
 import { fullSync } from '../../utils/sync';
 import { analyzeRepo, fetchReadmeSummary, validateLlmConfig, getProviderDefaults } from '../../utils/llm';
+import { getCategoryInfo, getSubCategoryLabel, CATEGORIES } from '../../utils/classify';
 import type { TaggedRepo, LlmProvider } from '../../utils/types';
 import TagBadge from '../../components/TagBadge';
 
@@ -18,10 +19,16 @@ export default function SidePanelApp() {
   const [allTags, setAllTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // v1.1: Category stats
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
+  const [uncategorizedCount, setUncategorizedCount] = useState(0);
+
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [showUntaggedOnly, setShowUntaggedOnly] = useState(false);
+  const [filterCategory, setFilterCategory] = useState<string | null>(null);
+  const [filterSubCategory, setFilterSubCategory] = useState<string | null>(null);
 
   // AI
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
@@ -47,6 +54,9 @@ export default function SidePanelApp() {
   const loadData = useCallback(async () => {
     setRepos(await db.repos.toArray());
     setAllTags(await getAllTags());
+    const catStats = await getCategoryStats();
+    setCategoryCounts(catStats.categoryCounts);
+    setUncategorizedCount(catStats.uncategorized);
   }, []);
 
   const loadSettings = useCallback(async () => {
@@ -72,8 +82,20 @@ export default function SidePanelApp() {
 
   const filteredRepos = useMemo(() => {
     let result = repos;
+
+    if (filterCategory) {
+      if (filterCategory === 'uncategorized') {
+        result = result.filter((r) => r.category === 'uncategorized' || !r.category);
+      } else if (filterSubCategory) {
+        result = result.filter((r) => r.category === filterCategory && r.subCategory === filterSubCategory);
+      } else {
+        result = result.filter((r) => r.category === filterCategory);
+      }
+    }
+
     if (showUntaggedOnly) result = result.filter((r) => r.tags.length === 0);
     if (selectedTag) result = result.filter((r) => r.tags.includes(selectedTag!));
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -81,11 +103,13 @@ export default function SidePanelApp() {
           r.fullName.toLowerCase().includes(q) ||
           (r.description ?? '').toLowerCase().includes(q) ||
           (r.language ?? '').toLowerCase().includes(q) ||
-          r.tags.some((t) => t.toLowerCase().includes(q)),
+          r.tags.some((t) => t.toLowerCase().includes(q)) ||
+          (r.category ?? '').toLowerCase().includes(q) ||
+          (r.subCategory ?? '').toLowerCase().includes(q),
       );
     }
     return result.sort((a, b) => b.stars - a.stars);
-  }, [repos, selectedTag, searchQuery, showUntaggedOnly]);
+  }, [repos, selectedTag, searchQuery, showUntaggedOnly, filterCategory, filterSubCategory]);
 
   // ─── Tag actions ─────────────────────────────────────
 
@@ -270,14 +294,29 @@ export default function SidePanelApp() {
               />
             </div>
 
-            <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Category + tag filter chips */}
+            <div className="flex flex-wrap items-center gap-1">
               <HiFunnel className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              <button onClick={() => { setSelectedTag(null); setShowUntaggedOnly(false); }}
+              <button onClick={() => { setSelectedTag(null); setShowUntaggedOnly(false); setFilterCategory(null); setFilterSubCategory(null); }}
                 className={`text-xs px-2 py-1 rounded-full border transition-colors ${
-                  !selectedTag && !showUntaggedOnly
+                  !selectedTag && !showUntaggedOnly && !filterCategory
                     ? 'bg-blue-600 text-white border-blue-600'
                     : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
                 }`}>All</button>
+              {CATEGORIES.map((cat) => {
+                const count = categoryCounts[cat.key] || 0;
+                if (count === 0) return null;
+                return (
+                  <button key={cat.key} onClick={() => setFilterCategory(filterCategory === cat.key ? null : cat.key)}
+                    className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                      filterCategory === cat.key
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
+                    }`}>
+                    {cat.icon} {count}
+                  </button>
+                );
+              })}
               <button onClick={() => setShowUntaggedOnly(!showUntaggedOnly)}
                 className={`text-xs px-2 py-1 rounded-full border transition-colors ${
                   showUntaggedOnly
@@ -286,14 +325,6 @@ export default function SidePanelApp() {
                 }`}>
                 Untagged ({untaggedCount})
               </button>
-              {allTags.map((tag) => (
-                <button key={tag} onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                  className={`text-xs px-2 py-1 rounded-full border transition-colors ${
-                    selectedTag === tag
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
-                  }`}>{tag}</button>
-              ))}
             </div>
 
             {/* Sync bar */}
@@ -481,6 +512,13 @@ function RepoRow({
     setShowInput(false);
   };
 
+  const catInfo = repo.category && repo.category !== 'uncategorized'
+    ? getCategoryInfo(repo.category)
+    : null;
+  const subLabel = repo.subCategory && catInfo
+    ? getSubCategoryLabel(repo.category, repo.subCategory)
+    : null;
+
   return (
     <div className="p-2.5 rounded-lg border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all">
       <div className="flex items-start gap-2.5">
@@ -493,7 +531,18 @@ function RepoRow({
           {repo.description && (
             <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{repo.description}</p>
           )}
-          <div className="flex flex-wrap items-center gap-1 mt-1.5">
+
+          {/* v1.1: Category badge */}
+          {catInfo && (
+            <div className="flex items-center gap-1 mt-1">
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-800">
+                {catInfo.icon} {subLabel || catInfo.label.split('/')[0].trim()}
+              </span>
+            </div>
+          )}
+
+          {/* Tags */}
+          <div className="flex flex-wrap items-center gap-1 mt-1">
             {repo.tags.map((tag) => (
               <TagBadge key={tag} tag={tag} onRemove={(t) => onRemoveTag(repo.id, t)} size="sm" />
             ))}

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { HiCog6Tooth, HiSparkles, HiBars3CenterLeft } from 'react-icons/hi2';
-import { db, getSettings, updateSettings, getAiCache, setAiCache, getUnanalyzedRepos } from '../../utils/db';
+import { db, getSettings, updateSettings, getAiCache, setAiCache, getUnanalyzedRepos, getCategoryStats } from '../../utils/db';
 import { getAllTags, addTagsToRepo, removeTagsFromRepo, bulkTagRepos } from '../../utils/tags';
 import { fullSync } from '../../utils/sync';
 import { analyzeRepo, fetchReadmeSummary, validateLlmConfig, getProviderDefaults } from '../../utils/llm';
+import { CATEGORIES } from '../../utils/classify';
 import type { TaggedRepo, LlmProvider, LlmSettings } from '../../utils/types';
 import FilterBar from '../../components/FilterBar';
 import SyncStatus from '../../components/SyncStatus';
@@ -19,9 +20,17 @@ export default function PopupApp() {
   const [allTags, setAllTags] = useState<string[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
 
+  // v1.1: Category stats
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
+  const [uncategorizedCount, setUncategorizedCount] = useState(0);
+
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+
+  // v1.1: Category filter
+  const [filterCategory, setFilterCategory] = useState<string | null>(null);
+  const [filterSubCategory, setFilterSubCategory] = useState<string | null>(null);
 
   // Settings state
   const [githubToken, setGithubToken] = useState('');
@@ -45,6 +54,9 @@ export default function PopupApp() {
     const allRepos = await db.repos.toArray();
     setRepos(allRepos);
     setAllTags(await getAllTags());
+    const catStats = await getCategoryStats();
+    setCategoryCounts(catStats.categoryCounts);
+    setUncategorizedCount(catStats.uncategorized);
   }, []);
 
   const loadSettings = useCallback(async () => {
@@ -70,9 +82,26 @@ export default function PopupApp() {
 
   const filteredRepos = useMemo(() => {
     let result = repos;
+
+    // Apply category filter
+    if (filterCategory) {
+      if (filterCategory === 'uncategorized') {
+        result = result.filter((r) => r.category === 'uncategorized' || !r.category);
+      } else if (filterSubCategory) {
+        result = result.filter(
+          (r) => r.category === filterCategory && r.subCategory === filterSubCategory
+        );
+      } else {
+        result = result.filter((r) => r.category === filterCategory);
+      }
+    }
+
+    // Apply tag filter
     if (selectedTag) {
       result = result.filter((r) => r.tags.includes(selectedTag!));
     }
+
+    // Apply search
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -80,11 +109,13 @@ export default function PopupApp() {
           r.fullName.toLowerCase().includes(q) ||
           (r.description ?? '').toLowerCase().includes(q) ||
           (r.language ?? '').toLowerCase().includes(q) ||
-          r.tags.some((t) => t.toLowerCase().includes(q))
+          r.tags.some((t) => t.toLowerCase().includes(q)) ||
+          r.category?.toLowerCase().includes(q) ||
+          r.subCategory?.toLowerCase().includes(q)
       );
     }
     return result.sort((a, b) => b.stars - a.stars);
-  }, [repos, selectedTag, searchQuery]);
+  }, [repos, selectedTag, searchQuery, filterCategory, filterSubCategory]);
 
   const getLastSync = useCallback(async () => {
     const newest = await db.repos.orderBy('lastSyncedAt').last();
@@ -186,13 +217,11 @@ export default function PopupApp() {
 
   const handleOpenSidePanel = async () => {
     try {
-      // Must call directly from popup (user gesture context), not via background message
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (tab?.id) {
         await (browser.sidePanel as any).open({ tabId: tab.id });
       }
     } catch (err) {
-      // If sidePanel.open fails, try alternative: open options page
       console.warn('Side panel not available, opening options page:', err);
       await browser.tabs.create({ url: 'options.html' });
     }
@@ -243,12 +272,37 @@ export default function PopupApp() {
               totalCount={repos.length}
               onSync={handleSync}
             />
+
+            {/* v1.1: Category breakdown strip */}
+            {Object.keys(categoryCounts).length > 0 && (
+              <div className="flex flex-wrap gap-1.5 text-[10px] text-gray-400 px-1">
+                {CATEGORIES.map((cat) => {
+                  const count = categoryCounts[cat.key] || 0;
+                  if (count === 0) return null;
+                  return (
+                    <span key={cat.key} className="flex items-center gap-0.5">
+                      {cat.icon} {count}
+                    </span>
+                  );
+                })}
+                {uncategorizedCount > 0 && (
+                  <span className="flex items-center gap-0.5">❓ {uncategorizedCount}</span>
+                )}
+              </div>
+            )}
+
             <FilterBar
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               selectedTag={selectedTag}
               allTags={allTags}
               onTagFilter={setSelectedTag}
+              activeCategory={filterCategory}
+              onCategorySelect={setFilterCategory}
+              activeSubCategory={filterSubCategory}
+              onSubCategorySelect={setFilterSubCategory}
+              categoryCounts={categoryCounts}
+              uncategorizedCount={uncategorizedCount}
             />
             <ExportImport onImportComplete={loadData} />
             <AiAnalyzer
@@ -325,6 +379,35 @@ export default function PopupApp() {
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg" />
               </div>
             </div>
+
+            {/* ─── v1.1: Classification overview ─── */}
+            {Object.keys(categoryCounts).length > 0 && (
+              <div className="border-b border-gray-100 pb-4 space-y-2">
+                <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+                  📂 Auto-Classification (v1.1)
+                </h2>
+                <p className="text-xs text-gray-500">
+                  Your repos are automatically classified into 5 categories on every sync.
+                </p>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {CATEGORIES.map((cat) => {
+                    const count = categoryCounts[cat.key] || 0;
+                    return (
+                      <div key={cat.key} className="px-2.5 py-1.5 bg-gray-50 rounded text-xs">
+                        <span className="font-medium text-gray-700">{cat.icon} {cat.label}</span>
+                        <span className="text-gray-400 ml-2">{count} repos</span>
+                      </div>
+                    );
+                  })}
+                  {uncategorizedCount > 0 && (
+                    <div className="px-2.5 py-1.5 bg-gray-50 rounded text-xs">
+                      <span className="font-medium text-gray-500">❓ Uncategorized</span>
+                      <span className="text-gray-400 ml-2">{uncategorizedCount} repos</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* ─── LLM AI Classifier ─── */}
             <div className="border-b border-gray-100 pb-4 space-y-3">

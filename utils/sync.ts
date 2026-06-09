@@ -5,6 +5,7 @@
 import { db, getSettings, applyAutoRules, setAiCache } from './db';
 import { fetchAllStars } from './github';
 import { analyzeRepo, fetchReadmeSummary } from './llm';
+import { classifyRepo } from './classify';
 import type { TaggedRepo } from './types';
 
 /**
@@ -41,7 +42,18 @@ export async function fullSync(token: string): Promise<{
 
     let tags = existing?.tags ?? [];
 
-    // Apply auto-classify if enabled
+    // v1.1: Auto-classify into 5 standard categories (always runs)
+    const catResult = classifyRepo({
+      name: raw.name,
+      fullName: raw.fullName,
+      description: raw.description || '',
+      language: raw.language || '',
+      topics: raw.topics,
+    });
+    const category = catResult.category;
+    const subCategory = catResult.subCategory;
+
+    // Apply auto-classify rules (custom tags) if enabled
     if (settings.autoClassifyEnabled) {
       const autoTags = await applyAutoRules({ ...raw, tags: [], lastSyncedAt: 0 });
       if (autoTags.length > 0) {
@@ -57,7 +69,7 @@ export async function fullSync(token: string): Promise<{
       tags = [...tagSet];
     }
 
-    await db.repos.put({ ...raw, tags, lastSyncedAt: Date.now() }, raw.id);
+    await db.repos.put({ ...raw, tags, category, subCategory, lastSyncedAt: Date.now() }, raw.id);
   }
 
   // ─── LLM auto-classify for new repos ───────────────────

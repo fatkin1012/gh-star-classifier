@@ -3,7 +3,7 @@
 // ============================================================
 
 import { defineBackground } from 'wxt/utils/define-background';
-import { db, getSettings } from '../utils/db';
+import { db, getSettings, getCategoryStats } from '../utils/db';
 import { fullSync } from '../utils/sync';
 import { addTagsToRepo, removeTagsFromRepo } from '../utils/tags';
 
@@ -98,7 +98,13 @@ export default defineBackground(() => {
         case 'GET_STATS': {
           const count = await db.repos.count();
           const newest = await db.repos.orderBy('lastSyncedAt').last();
-          return { totalCount: count, lastSyncedAt: newest?.lastSyncedAt ?? null };
+          const catStats = await getCategoryStats();
+          return {
+            totalCount: count,
+            lastSyncedAt: newest?.lastSyncedAt ?? null,
+            categoryCounts: catStats.categoryCounts,
+            uncategorized: catStats.uncategorized,
+          };
         }
 
         case 'CLEAR_BADGE': {
