@@ -81,6 +81,7 @@ export async function fetchAllStars(opts: FetchStarsOptions): Promise<StarredRep
 function convertRepos(items: Array<Record<string, unknown>>): StarredRepo[] {
   return items.map((item: Record<string, unknown>) => ({
     id: item.id as number,
+    nodeId: (item.node_id as string) ?? '',
     name: (item.name as string) ?? '',
     fullName: (item.full_name as string) ?? '',
     description: (item.description as string | null) ?? null,
@@ -115,6 +116,7 @@ export async function fetchRepo(token: string, owner: string, repo: string): Pro
     const { data } = await octokit.rest.repos.get({ owner, repo });
     return {
       id: data.id,
+      nodeId: data.node_id,
       name: data.name,
       fullName: data.full_name,
       description: data.description,

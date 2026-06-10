@@ -4,6 +4,7 @@
 
 export interface StarredRepo {
   id: number;
+  nodeId: string;   // GraphQL global ID (e.g. "R_kgDO...")
   name: string;
   fullName: string;
   description: string | null;
@@ -82,6 +83,8 @@ export interface AppSettings {
   newStarDefaultTags: string[];
   /** LLM classifier settings */
   llm: LlmSettings;
+  /** If true, sync classification to GitHub star lists */
+  syncToGitHubLists: boolean;
 }
 
 export const DEFAULT_LLM_SETTINGS: LlmSettings = {
@@ -101,4 +104,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   syncIntervalMinutes: 30,
   newStarDefaultTags: [],
   llm: { ...DEFAULT_LLM_SETTINGS },
+  syncToGitHubLists: true,
 };

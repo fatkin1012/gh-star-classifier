@@ -18,6 +18,7 @@ export class StarDB extends Dexie {
   rules!: Table<AutoTagRule, number>;
   settings!: Table<AppSettings, string>;
   aiCache!: Table<AiCacheEntry, number>;
+  categoryListMap!: Table<{ categoryKey: string; listId: string; listName: string }, string>;
 
   constructor() {
     super('GitHubStarClassifier');
@@ -60,6 +61,15 @@ export class StarDB extends Dexie {
           });
         }
       }
+    });
+
+    // v4: add categoryListMap for syncing to GitHub star lists
+    this.version(4).stores({
+      repos: 'id, name, fullName, language, *tags, starredAt, category, subCategory',
+      rules: '++id, name, matchType',
+      settings: 'key',
+      aiCache: 'repoId',
+      categoryListMap: 'categoryKey',
     });
   }
 }
@@ -224,4 +234,31 @@ export async function applyAutoRules(repo: TaggedRepo): Promise<string[]> {
     if (hit) rule.tags.forEach((t) => matched.add(t));
   }
   return [...matched];
+}
+
+// ─── Category List Map ────────────────────────────────────
+
+/**
+ * Get cached GitHub list ID for a category key.
+ */
+export async function getCachedListId(categoryKey: string): Promise<{ listId: string; listName: string } | null> {
+  const d = getDb();
+  const entry = await d.categoryListMap.get(categoryKey);
+  return entry ? { listId: entry.listId, listName: entry.listName } : null;
+}
+
+/**
+ * Cache a GitHub list ID for a category key.
+ */
+export async function setCachedListId(categoryKey: string, listId: string, listName: string): Promise<void> {
+  const d = getDb();
+  await d.categoryListMap.put({ categoryKey, listId, listName }, categoryKey);
+}
+
+/**
+ * Clear the entire category list map cache.
+ */
+export async function clearCategoryListCache(): Promise<void> {
+  const d = getDb();
+  await d.categoryListMap.clear();
 }

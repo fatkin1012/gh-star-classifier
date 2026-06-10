@@ -17,10 +17,14 @@ export default function OptionsApp() {
 
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
+  const [syncToGitHubLists, setSyncToGitHubLists] = useState(true);
 
   useEffect(() => {
     loadRules();
-    getSettings().then((s) => setToken(s.githubToken ?? ''));
+    getSettings().then((s) => {
+      setToken(s.githubToken ?? '');
+      setSyncToGitHubLists(s.syncToGitHubLists ?? true);
+    });
     getCategoryStats().then((s) => {
       setCategoryCounts(s.categoryCounts);
       setUncategorizedCount(s.uncategorized);
@@ -88,13 +92,36 @@ export default function OptionsApp() {
         <p className="text-xs text-gray-500">Token with <code>repo</code> and <code>read:user</code> scopes</p>
       </section>
 
-      {/* v1.1: Classification Overview */}
-      {Object.keys(categoryCounts).length > 0 && (
-        <section className="space-y-2">
+      {/* v1.1: Classification Overview + v1.2: GitHub Lists Sync */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-700">📂 Auto-Classification (v1.1)</h2>
-          <p className="text-xs text-gray-500">
-            Repos are auto-classified into 5 standard categories during every sync.
-          </p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <span className="text-xs text-gray-500">Sync to GitHub Lists</span>
+            <button
+              role="switch"
+              aria-checked={syncToGitHubLists}
+              onClick={async () => {
+                const next = !syncToGitHubLists;
+                setSyncToGitHubLists(next);
+                await updateSettings({ syncToGitHubLists: next });
+              }}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                syncToGitHubLists ? 'bg-blue-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                  syncToGitHubLists ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                }`}
+              />
+            </button>
+          </label>
+        </div>
+        <p className="text-xs text-gray-500">
+          Repos are auto-classified into 5 standard categories during every sync.
+          {syncToGitHubLists && ' Classified repos are also added to the corresponding GitHub star list.'}
+        </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {CATEGORIES.map((cat) => {
               const count = categoryCounts[cat.key] || 0;
@@ -123,7 +150,6 @@ export default function OptionsApp() {
             )}
           </div>
         </section>
-      )}
 
       {/* Auto-classify Rules */}
       <section className="space-y-3">

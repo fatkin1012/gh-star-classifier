@@ -6,6 +6,7 @@ import { db, getSettings, applyAutoRules, setAiCache } from './db';
 import { fetchAllStars } from './github';
 import { analyzeRepo, fetchReadmeSummary } from './llm';
 import { classifyRepo } from './classify';
+import { ensureCategoryList, addRepoToList } from './starlists';
 import type { TaggedRepo } from './types';
 
 /**
@@ -34,6 +35,8 @@ export async function fullSync(token: string): Promise<{
   // Convert to TaggedRepo, apply auto-rules
   let newCount = 0;
   let autoTagged = 0;
+  // Cache category list IDs by category key to avoid redundant API calls
+  const listIdCache = new Map<string, string>();
 
   for (const raw of rawRepos) {
     const existing = await db.repos.get(raw.id);
@@ -55,7 +58,7 @@ export async function fullSync(token: string): Promise<{
 
     // Apply auto-classify rules (custom tags) if enabled
     if (settings.autoClassifyEnabled) {
-      const autoTags = await applyAutoRules({ ...raw, tags: [], lastSyncedAt: 0 });
+      const autoTags = await applyAutoRules({ ...raw, tags: [], category: '', subCategory: '', lastSyncedAt: 0 });
       if (autoTags.length > 0) {
         const tagSet = new Set([...tags, ...autoTags]);
         tags = [...tagSet];
@@ -70,12 +73,35 @@ export async function fullSync(token: string): Promise<{
     }
 
     await db.repos.put({ ...raw, tags, category, subCategory, lastSyncedAt: Date.now() }, raw.id);
+
+    // ─── Sync to GitHub star lists (v1.2) ─────────────────────
+    if (settings.syncToGitHubLists && category && category !== 'uncategorized' && raw.nodeId) {
+      try {
+        // Get or create the category list (cached per category per sync)
+        if (!listIdCache.has(category)) {
+          const listId = await ensureCategoryList(token, category);
+          listIdCache.set(category, listId);
+        }
+        const listId = listIdCache.get(category)!;
+        await addRepoToList(token, listId, raw.nodeId);
+      } catch (err) {
+        console.error(`[Sync] Failed to sync ${raw.fullName} to star list:`, err);
+      }
+    }
   }
 
   // ─── LLM auto-classify for new repos ───────────────────
   if (settings.llm.autoClassifyNew && settings.llm.apiKey && newCount > 0) {
     for (const raw of rawRepos) {
-      const tagged: TaggedRepo = { ...raw, tags: [], category: category || '', subCategory: subCategory || '', lastSyncedAt: 0 };
+      // Re-classify for the LLM section (variables not in scope here)
+      const llmCatResult = classifyRepo({
+        name: raw.name,
+        fullName: raw.fullName,
+        description: raw.description || '',
+        language: raw.language || '',
+        topics: raw.topics,
+      });
+      const tagged: TaggedRepo = { ...raw, tags: [], category: llmCatResult.category || '', subCategory: llmCatResult.subCategory || '', lastSyncedAt: 0 };
       try {
         const readmeSummary = await fetchReadmeSummary(tagged);
         const suggestion = await analyzeRepo(tagged, readmeSummary, settings.llm);
