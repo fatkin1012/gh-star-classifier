@@ -318,11 +318,23 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
 
 // ─────── 評分引擎 ───────
 
-interface ClassificationResult {
+export interface ClassificationResult {
   category: string;      // 主分類 key
   subCategory: string;   // 子分類 key（可以為空）
   confidence: number;    // 置信度 0-100
 }
+
+/**
+ * Optional AI classifier callback for classifyRepo.
+ * Should return category + subCategory + tags, or null to fallback to rule-based.
+ */
+export type AiClassifier = (repo: {
+  name: string;
+  fullName: string;
+  description: string;
+  language: string;
+  topics: string[];
+}) => Promise<{ category: string; subCategory: string; tags?: string[] } | null>;
 
 /**
  * Language → category fallback map.
@@ -356,9 +368,10 @@ const LANGUAGE_CATEGORY_FALLBACK: Record<string, string> = {
 };
 
 /**
- * 對一個 repo 進行分類
+ * Synchronous rule-based classification (v1.4+: internal fallback).
+ * Used by classifyRepo when AI is unavailable.
  */
-export function classifyRepo(repo: {
+export function classifyRepoSync(repo: {
   name: string;
   fullName: string;
   description: string;
@@ -457,6 +470,48 @@ export function classifyRepo(repo: {
     category: bestCat,
     subCategory: subCat,
     confidence,
+  };
+}
+
+/**
+ * Async classification with AI override (v1.4).
+ * If aiClassifier is provided and succeeds, its result overrides the rule-based result.
+ * Falls back to rule-based when AI is unavailable, fails, or returns uncategorized.
+ */
+export async function classifyRepo(
+  repo: {
+    name: string;
+    fullName: string;
+    description: string;
+    language: string;
+    topics: string[];
+  },
+  aiClassifier?: AiClassifier | null,
+): Promise<ClassificationResult & { tags?: string[] }> {
+  // Try AI first
+  if (aiClassifier) {
+    try {
+      const aiResult = await aiClassifier(repo);
+      if (aiResult && aiResult.category && aiResult.category !== 'uncategorized') {
+        return {
+          category: aiResult.category,
+          subCategory: aiResult.subCategory || '',
+          confidence: 85,
+          tags: aiResult.tags || [],
+        };
+      }
+    } catch (err) {
+      console.warn('[Classify] AI classification failed, falling back to rules:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // Fallback to rule-based classification
+  const syncResult = classifyRepoSync(repo);
+  return {
+    category: syncResult.category,
+    subCategory: syncResult.subCategory,
+    confidence: syncResult.confidence,
+    tags: [],
   };
 }
 
@@ -567,18 +622,19 @@ export function getSubCategoryLabel(categoryKey: string, subKey: string): string
 /**
  * 批量分類多個 repo（同步時調用）
  */
-export function batchClassify(
+export async function batchClassify(
   repos: Array<{
     name: string;
     fullName: string;
     description: string;
     language: string;
     topics: string[];
-  }>
-): Map<string, ClassificationResult> {
-  const results = new Map<string, ClassificationResult>();
+  }>,
+  aiClassifier?: AiClassifier | null,
+): Promise<Map<string, ClassificationResult & { tags?: string[] }>> {
+  const results = new Map<string, ClassificationResult & { tags?: string[] }>();
   for (const repo of repos) {
-    results.set(repo.fullName, classifyRepo(repo));
+    results.set(repo.fullName, await classifyRepo(repo, aiClassifier));
   }
   return results;
 }

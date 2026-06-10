@@ -54,25 +54,45 @@ export function getProviderDefaults(provider: LlmProvider): { model: string; bas
 
 // ─── Prompt templates ────────────────────────────────────────
 
-const DEFAULT_TAXONOMY_PROMPT = `You are a GitHub repository classifier. Analyze the repo and suggest tags.
+const DEFAULT_TAXONOMY_PROMPT = `You are a GitHub repository classifier. Analyze the repo and assign it to ONE of 5 categories plus relevant tags.
 
-Rules:
-1. Suggest 1-5 tags that best describe the repo
-2. Tags should be short, single words or compound words (e.g. "machine-learning", "web-framework")
-3. Prioritize: primary language/framework → domain → use case → tooling
-4. Output ONLY valid JSON with no markdown, no code fences, no extra text
+# Categories
+
+## applications-tools
+Desktop/web/mobile apps, CLI tools, games, browser extensions, dev tools
+Subcategories: cli-tool, desktop-app, web-app, game, dev-tool, browser-ext
+
+## libraries-frameworks
+npm/pip/cargo packages, React/Vue components, UI libraries, SDK wrappers, plugins, frameworks, utility libs
+Subcategories: npm-package, react-component, ui-library, utility, sdk-wrapper, plugin, framework
+
+## boilerplates-starters
+Templates, starter kits, scaffolding, example/demo projects, cookiecutters
+Subcategories: web-template, backend-template, fullstack-template, config-template, starter-kit
+
+## awesome-lists-tutorials
+Curated awesome lists, learning resources, tutorials, interview prep, study notes, docs
+Subcategories: awesome-list, interview-qa, learning-notes, documentation, course-tutorial
+
+## scripts-dotfiles
+Shell scripts, dotfiles, GitHub Actions, Docker configs, CI/CD, VBA macros
+Subcategories: shell-script, github-action, docker-config, dotfiles, vba-macro, ci-cd
+
+# Rules
+- Pick exactly ONE category and the most specific subcategory
+- If uncertain about subcategory, use empty string
+- Suggest 1-5 short tags (single or compound words like "machine-learning", "web-framework")
+- Tags should describe: primary language/framework → domain → use case → tooling
+- Output ONLY valid JSON, no markdown fences, no extra text
 
 Response format:
 {
-  "tags": ["tag1", "tag2"],
-  "reasoning": "very brief explanation",
+  "category": "applications-tools",
+  "subCategory": "cli-tool",
+  "tags": ["python", "cli", "file-management"],
+  "reasoning": "Brief explanation of category choice",
   "confidence": "high" | "medium" | "low"
 }
-
-Examples:
-- {"tags": ["python", "machine-learning", "deep-learning", "pytorch"], "reasoning": "Deep learning framework built on PyTorch", "confidence": "high"}
-- {"tags": ["typescript", "react", "ui-components"], "reasoning": "React component library with TypeScript", "confidence": "high"}
-- {"tags": ["go", "database", "cli"], "reasoning": "A Go-based database CLI tool", "confidence": "medium"}
 
 Now classify this repository:
 Name: {name}
@@ -228,7 +248,11 @@ function parseSuggestion(raw: string): AiSuggestion {
 
   try {
     const parsed = JSON.parse(cleaned);
+    const category = typeof parsed.category === 'string' ? parsed.category : '';
+    const subCategory = typeof parsed.subCategory === 'string' ? parsed.subCategory : '';
     return {
+      category,
+      subCategory,
       tags: Array.isArray(parsed.tags) ? parsed.tags : [],
       reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
       confidence: ['high', 'medium', 'low'].includes(parsed.confidence)
@@ -267,12 +291,30 @@ export async function saveAiSuggestion(repoId: number, suggestion: AiSuggestion)
   });
 }
 
-/** Analyze a single repo with LLM */
+/**
+ * Analyze a single repo with LLM (legacy — tags only).
+ * For unified classification (category + tags) use classifyRepoWithLLM instead.
+ */
 export async function analyzeRepo(
   repo: TaggedRepo,
   readmeSummary: string,
   config: LlmConfig,
 ): Promise<AiSuggestion> {
+  const prompt = buildPrompt(repo, readmeSummary, config.customPrompt);
+  const raw = await callLlm(prompt, config);
+  return parseSuggestion(raw);
+}
+
+/**
+ * Unified LLM classification: returns category + subCategory + tags in one call.
+ * This is the main entry point for v1.4 unified AI classification.
+ */
+export async function classifyRepoWithLLM(
+  repo: TaggedRepo,
+  readmeSummary: string,
+  config: LlmConfig,
+): Promise<AiSuggestion> {
+  // Build a prompt focused on category selection + tags
   const prompt = buildPrompt(repo, readmeSummary, config.customPrompt);
   const raw = await callLlm(prompt, config);
   return parseSuggestion(raw);

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { HiCog6Tooth, HiSparkles, HiBars3CenterLeft } from 'react-icons/hi2';
+import { HiCog6Tooth, HiSparkles, HiBars3CenterLeft, HiShieldCheck, HiListBullet } from 'react-icons/hi2';
 import { db, getSettings, updateSettings, getAiCache, setAiCache, getUnanalyzedRepos, getCategoryStats } from '../../utils/db';
 import { getAllTags, addTagsToRepo, removeTagsFromRepo, bulkTagRepos } from '../../utils/tags';
-import { fullSync } from '../../utils/sync';
-import { analyzeRepo, fetchReadmeSummary, validateLlmConfig, getProviderDefaults } from '../../utils/llm';
+import { fullSync, syncToGitHubStarLists } from '../../utils/sync';
+import { validateLlmConfig, getProviderDefaults } from '../../utils/llm';
+import { checkTokenScopes } from '../../utils/github';
 import { CATEGORIES } from '../../utils/classify';
 import type { TaggedRepo, LlmProvider, LlmSettings } from '../../utils/types';
 import FilterBar from '../../components/FilterBar';
@@ -38,6 +39,14 @@ export default function PopupApp() {
   const [syncInterval, setSyncInterval] = useState(30);
   const [newStarDefaultTags, setNewStarDefaultTags] = useState('');
   const [tokenSaved, setTokenSaved] = useState(false);
+
+  // Token scope check (Task 2)
+  const [checkingScope, setCheckingScope] = useState(false);
+  const [scopeResult, setScopeResult] = useState<{ scopes: string[]; hasUserScope: boolean } | null>(null);
+
+  // Sync to Lists (Task 3)
+  const [syncingLists, setSyncingLists] = useState(false);
+  const [syncListsStatus, setSyncListsStatus] = useState<string | null>(null);
 
   // LLM settings state
   const [llmProvider, setLlmProvider] = useState<LlmProvider>('openai');
@@ -153,6 +162,48 @@ export default function PopupApp() {
   const handleApplyAiSuggestion = async (repoId: number, tags: string[]) => {
     await addTagsToRepo(repoId, tags);
     await loadData();
+  };
+
+  // ─── Token scope check (Task 2) ────────────────────────
+
+  const handleCheckScope = async () => {
+    const s = await getSettings();
+    if (!s.githubToken) {
+      setScopeResult({ scopes: [], hasUserScope: false });
+      return;
+    }
+    setCheckingScope(true);
+    setScopeResult(null);
+    try {
+      const result = await checkTokenScopes(s.githubToken);
+      setScopeResult(result);
+      await updateSettings({ tokenHasUserScope: result.hasUserScope });
+    } catch (err) {
+      setScopeResult({ scopes: [], hasUserScope: false });
+    } finally {
+      setCheckingScope(false);
+    }
+  };
+
+  // ─── Sync to Lists (Task 3) ────────────────────────────
+
+  const handleSyncToLists = async () => {
+    const s = await getSettings();
+    if (!s.githubToken) {
+      setSyncListsStatus('GitHub token not configured');
+      return;
+    }
+    setSyncingLists(true);
+    setSyncListsStatus('Syncing to GitHub star lists...');
+    try {
+      const result = await syncToGitHubStarLists(s.githubToken);
+      setSyncListsStatus(`✓ Synced ${result.synced}/${result.total} repos to GitHub lists`);
+    } catch (err) {
+      setSyncListsStatus(`✗ ${err instanceof Error ? err.message : 'Sync failed'}`);
+    } finally {
+      setSyncingLists(false);
+      setTimeout(() => setSyncListsStatus(null), 5000);
+    }
   };
 
   // ─── LLM settings ─────────────────────────────────────
@@ -273,6 +324,24 @@ export default function PopupApp() {
               onSync={handleSync}
             />
 
+            {/* v1.4: Sync to Lists button */}
+            <button
+              onClick={handleSyncToLists}
+              disabled={syncingLists}
+              className="flex items-center justify-center gap-1.5 w-full px-3 py-2 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+              title="Sync all classified repos to GitHub star lists"
+            >
+              <HiListBullet className="w-3.5 h-3.5" />
+              {syncingLists ? 'Syncing...' : 'Sync to Lists'}
+            </button>
+            {syncListsStatus && (
+              <div className={`text-xs px-3 py-1.5 rounded-lg ${
+                syncListsStatus.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+              }`}>
+                {syncListsStatus}
+              </div>
+            )}
+
             {/* v1.1: Category breakdown strip */}
             {Object.keys(categoryCounts).length > 0 && (
               <div className="flex flex-wrap gap-1.5 text-[10px] text-gray-400 px-1">
@@ -342,6 +411,37 @@ export default function PopupApp() {
                   <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer"
                     className="text-blue-600 hover:underline">Generate</a>
                 </p>
+                {/* v1.4: Check Token button */}
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    onClick={handleCheckScope}
+                    disabled={checkingScope}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                  >
+                    <HiShieldCheck className="w-3.5 h-3.5" />
+                    {checkingScope ? 'Checking...' : 'Check Token'}
+                  </button>
+                  {scopeResult && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className={scopeResult.scopes.some(s => s === 'repo' || s.includes('repo')) ? 'text-green-600' : 'text-red-600'}>
+                        {scopeResult.scopes.some(s => s === 'repo' || s.includes('repo')) ? '✅ repo' : '❌ repo'}
+                      </span>
+                      <span className={scopeResult.hasUserScope ? 'text-green-600' : 'text-red-600'}>
+                        {scopeResult.hasUserScope ? '✅ user' : '❌ user'}
+                      </span>
+                      {!scopeResult.hasUserScope && (
+                        <a
+                          href="https://github.com/settings/tokens"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
+                          Update Token
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

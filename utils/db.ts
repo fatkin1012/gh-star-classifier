@@ -5,7 +5,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { TaggedRepo, AutoTagRule, AppSettings, AiSuggestion, DynamicCategoryRecord, DynamicCategory } from './types';
 import { DEFAULT_SETTINGS } from './types';
-import { classifyRepo } from './classify';
+import { classifyRepoSync } from './classify';
 
 /** Stored AI analysis result for a repo */
 export interface AiCacheEntry {
@@ -48,7 +48,7 @@ export class StarDB extends Dexie {
       const repos = await tx.table('repos').toArray();
       for (const repo of repos) {
         if (!repo.category) {
-          const result = classifyRepo({
+          const result = classifyRepoSync({
             name: repo.name || '',
             fullName: repo.fullName || '',
             description: repo.description || '',

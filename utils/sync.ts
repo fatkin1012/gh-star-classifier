@@ -1,11 +1,16 @@
 // ============================================================
 // Background sync — detect new stars and auto-classify
+//
+// v1.4: Unified AI-first classification.
+//   - LLM now does BOTH category + tags in one call
+//   - Rule-based is the fallback when LLM is unavailable
+//   - No more separate dual-pass (rule-based then LLM tags)
 // ============================================================
 
 import { db, getSettings, updateSettings, applyAutoRules, setAiCache, getUncategorizedRepos, getDynamicCategories, putDynamicCategory } from './db';
 import { fetchAllStars, checkTokenScopes } from './github';
-import { analyzeRepo, fetchReadmeSummary } from './llm';
-import { classifyRepo } from './classify';
+import { classifyRepoWithLLM, fetchReadmeSummary } from './llm';
+import { classifyRepoSync } from './classify';
 import {
   ensureCategoryList,
   addRepoToList,
@@ -16,7 +21,10 @@ import type { TaggedRepo } from './types';
 
 /**
  * Full sync: fetch all stars from GitHub and merge into DB.
- * Returns counts for notification purposes.
+ * 
+ * v1.4 change: LLM classification now REPLACES rule-based for new repos
+ * when LLM is configured and autoClassifyNew is enabled.
+ * Rule-based is kept as fallback when LLM is unavailable or fails.
  */
 export async function fullSync(token: string): Promise<{
   total: number;
@@ -33,7 +41,6 @@ export async function fullSync(token: string): Promise<{
     if (!tokenHasUserScope) {
       console.info('[Sync] Token lacks "user" scope — skipping GitHub Lists sync (silent)');
     }
-    // Persist the scope check so the options page can read it
     await updateSettings({ tokenHasUserScope });
   }
 
@@ -44,19 +51,16 @@ export async function fullSync(token: string): Promise<{
   const newest = await db.repos
     .orderBy('starredAt')
     .last();
-
   const since = newest?.starredAt;
 
-  const rawRepos = await fetchAllStars({
-    token,
-    since,
-  });
+  const rawRepos = await fetchAllStars({ token, since });
 
-  // Convert to TaggedRepo, apply auto-rules
   let newCount = 0;
   let autoTagged = 0;
-  // Cache category list IDs by category key to avoid redundant API calls
   const listIdCache = new Map<string, string>();
+
+  // ─── Determine if LLM should be used for new repos ──────────
+  const useLLM = settings.llm.autoClassifyNew && settings.llm.apiKey && settings.llm.autoClassifyNew;
 
   for (const raw of rawRepos) {
     const existing = await db.repos.get(raw.id);
@@ -64,21 +68,70 @@ export async function fullSync(token: string): Promise<{
     if (isNew) newCount++;
 
     let tags = existing?.tags ?? [];
+    let category: string;
+    let subCategory: string;
 
-    // v1.1: Auto-classify into 5 standard categories (always runs)
-    const catResult = classifyRepo({
-      name: raw.name,
-      fullName: raw.fullName,
-      description: raw.description || '',
-      language: raw.language || '',
-      topics: raw.topics,
-    });
-    const category = catResult.category;
-    const subCategory = catResult.subCategory;
+    if (isNew && useLLM) {
+      // ─── v1.4: AI-first classification (category + tags in one call) ───
+      try {
+        const tagged: TaggedRepo = {
+          ...raw, tags: [], category: '', subCategory: '', dynamicCategory: '', lastSyncedAt: Date.now(),
+        };
+        const readmeSummary = await fetchReadmeSummary(tagged);
+        const suggestion = await classifyRepoWithLLM(tagged, readmeSummary, settings.llm);
+
+        category = suggestion.category || '';
+        subCategory = suggestion.subCategory || '';
+
+        if (suggestion.tags.length > 0) {
+          const tagSet = new Set(tags);
+          for (const t of suggestion.tags) tagSet.add(t);
+          tags = [...tagSet];
+          autoTagged += suggestion.tags.length;
+
+          // Cache the AI suggestion
+          await setAiCache(raw.id, { ...suggestion, analyzedAt: Date.now() });
+        }
+
+        // Validate category against known taxonomy
+        const validCategories = [
+          'applications-tools', 'libraries-frameworks', 'boilerplates-starters',
+          'awesome-lists-tutorials', 'scripts-dotfiles',
+        ];
+        if (!validCategories.includes(category)) {
+          category = '';
+          subCategory = '';
+        }
+      } catch (err) {
+        console.warn(`[Sync] LLM classification failed for ${raw.fullName}, falling back to rules:`, err);
+        const fallback = classifyRepoSync({
+          name: raw.name,
+          fullName: raw.fullName,
+          description: raw.description || '',
+          language: raw.language || '',
+          topics: raw.topics,
+        });
+        category = fallback.category;
+        subCategory = fallback.subCategory;
+      }
+    } else {
+      // ─── Rule-based classification (fallback / for existing repos) ───
+      const result = classifyRepoSync({
+        name: raw.name,
+        fullName: raw.fullName,
+        description: raw.description || '',
+        language: raw.language || '',
+        topics: raw.topics,
+      });
+      category = result.category;
+      subCategory = result.subCategory;
+    }
 
     // Apply auto-classify rules (custom tags) if enabled
     if (settings.autoClassifyEnabled) {
-      const autoTags = await applyAutoRules({ ...raw, tags: [], category: '', subCategory: '', dynamicCategory: '', lastSyncedAt: 0 });
+      const autoTags = await applyAutoRules({
+        ...raw, tags, category, subCategory, dynamicCategory: '', lastSyncedAt: 0,
+      });
       if (autoTags.length > 0) {
         const tagSet = new Set([...tags, ...autoTags]);
         tags = [...tagSet];
@@ -92,12 +145,13 @@ export async function fullSync(token: string): Promise<{
       tags = [...tagSet];
     }
 
-    await db.repos.put({ ...raw, tags, category, subCategory, dynamicCategory: '', lastSyncedAt: Date.now() }, raw.id);
+    await db.repos.put({
+      ...raw, tags, category, subCategory, dynamicCategory: '', lastSyncedAt: Date.now(),
+    }, raw.id);
 
     // ─── Sync to GitHub star lists (v1.2) ─────────────────────
     if (settings.syncToGitHubLists && tokenHasUserScope && category && category !== 'uncategorized' && raw.nodeId) {
       try {
-        // Get or create the category list (cached per category per sync)
         if (!listIdCache.has(category)) {
           const listId = await ensureCategoryList(token, category);
           listIdCache.set(category, listId);
@@ -105,40 +159,9 @@ export async function fullSync(token: string): Promise<{
         const listId = listIdCache.get(category)!;
         await addRepoToList(token, listId, raw.nodeId);
       } catch (err) {
-        // Individual failures are already handled in starlists.ts
-        // Log a brief warning only for non-scope, non-empty-data errors
         if (!(err instanceof Error && (err.message.includes('scope') || err.message.includes('empty data')))) {
           console.warn(`[Sync] Could not sync ${raw.fullName}: ${err instanceof Error ? err.message : err}`);
         }
-      }
-    }
-  }
-
-  // ─── LLM auto-classify for new repos ───────────────────
-  if (settings.llm.autoClassifyNew && settings.llm.apiKey && newCount > 0) {
-    for (const raw of rawRepos) {
-      // Re-classify for the LLM section (variables not in scope here)
-      const llmCatResult = classifyRepo({
-        name: raw.name,
-        fullName: raw.fullName,
-        description: raw.description || '',
-        language: raw.language || '',
-        topics: raw.topics,
-      });
-      const tagged: TaggedRepo = { ...raw, tags: [], category: llmCatResult.category || '', subCategory: llmCatResult.subCategory || '', dynamicCategory: '', lastSyncedAt: 0 };
-      try {
-        const readmeSummary = await fetchReadmeSummary(tagged);
-        const suggestion = await analyzeRepo(tagged, readmeSummary, settings.llm);
-        if (suggestion.tags.length > 0) {
-          await setAiCache(raw.id, { ...suggestion, analyzedAt: Date.now() });
-          const repo = await db.repos.get(raw.id);
-          if (repo) {
-            const merged = new Set([...repo.tags, ...suggestion.tags]);
-            await db.repos.update(raw.id, { tags: [...merged] });
-          }
-        }
-      } catch (err) {
-        console.error(`[LLM sync] Failed for ${raw.fullName}:`, err);
       }
     }
   }
@@ -205,6 +228,62 @@ export async function getNewStarCount(token: string): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+/**
+ * Manual sync of classified repos to GitHub star lists.
+ * Called from UI button (v1.4 feature).
+ * Syncs all repos that have a valid category to their corresponding GitHub list.
+ */
+export async function syncToGitHubStarLists(token: string): Promise<{
+  total: number;
+  synced: number;
+  skipped: number;
+}> {
+  const scopeResult = await checkTokenScopes(token);
+  if (!scopeResult.hasUserScope) {
+    throw new Error('Your token lacks the "user" scope. Update it at https://github.com/settings/tokens');
+  }
+
+  const allRepos = await db.repos.toArray();
+  const categorized = allRepos.filter((r) => r.category && r.category !== 'uncategorized' && r.nodeId);
+
+  let synced = 0;
+  let skipped = 0;
+
+  // Ensure all category lists exist first
+  const listIdCache = new Map<string, string>();
+  const uniqueCategories = [...new Set(categorized.map((r) => r.category))];
+
+  resetEmptyDataLog();
+
+  for (const catKey of uniqueCategories) {
+    try {
+      const listId = await ensureCategoryList(token, catKey);
+      listIdCache.set(catKey, listId);
+    } catch (err) {
+      console.warn(`[SyncToLists] Failed to ensure list for ${catKey}:`, err);
+    }
+  }
+
+  // Sync each repo
+  for (const repo of categorized) {
+    const listId = listIdCache.get(repo.category);
+    if (!listId) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      const ok = await addRepoToList(token, listId, repo.nodeId);
+      if (ok) synced++;
+      else skipped++;
+    } catch (err) {
+      skipped++;
+    }
+  }
+
+  return { total: categorized.length, synced, skipped };
 }
 
 /**

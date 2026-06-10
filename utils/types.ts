@@ -66,6 +66,10 @@ export interface LlmSettings {
 
 /** Cached AI suggestion for a repo (stored in-memory, not persisted to DB directly) */
 export interface AiSuggestion {
+  /** AI-predicted 5-category category key (e.g. "applications-tools") */
+  category?: string;
+  /** AI-predicted sub-category key (e.g. "cli-tool") */
+  subCategory?: string;
   tags: string[];
   reasoning: string;
   confidence: 'high' | 'medium' | 'low';

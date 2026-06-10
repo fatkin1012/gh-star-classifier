@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   HiStar, HiCog6Tooth, HiSparkles, HiMagnifyingGlass,
   HiFunnel, HiArrowPath, HiCheckCircle, HiTag, HiBars3,
+  HiListBullet,
 } from 'react-icons/hi2';
 import { db, getSettings, updateSettings, getAiCache, setAiCache, getCategoryStats } from '../../utils/db';
 import { getAllTags, addTagsToRepo, removeTagsFromRepo, bulkTagRepos } from '../../utils/tags';
-import { fullSync } from '../../utils/sync';
+import { fullSync, syncToGitHubStarLists } from '../../utils/sync';
 import { analyzeRepo, fetchReadmeSummary, validateLlmConfig, getProviderDefaults } from '../../utils/llm';
 import { getCategoryInfo, getSubCategoryLabel, CATEGORIES } from '../../utils/classify';
 import type { TaggedRepo, LlmProvider } from '../../utils/types';
@@ -121,6 +122,29 @@ export default function SidePanelApp() {
   const handleRemoveTag = async (repoId: number, tag: string) => {
     await removeTagsFromRepo(repoId, [tag]);
     await loadData();
+  };
+
+  // ─── Sync to Lists (Task 3) ───────────────────────────
+  const [syncingLists, setSyncingLists] = useState(false);
+  const [syncListsStatus, setSyncListsStatus] = useState<string | null>(null);
+
+  const handleSyncToLists = async () => {
+    const s = await getSettings();
+    if (!s.githubToken) {
+      setSyncListsStatus('GitHub token not configured');
+      return;
+    }
+    setSyncingLists(true);
+    setSyncListsStatus('Syncing to GitHub star lists...');
+    try {
+      const result = await syncToGitHubStarLists(s.githubToken);
+      setSyncListsStatus(`✓ Synced ${result.synced}/${result.total} repos to GitHub lists`);
+    } catch (err) {
+      setSyncListsStatus(`✗ ${err instanceof Error ? err.message : 'Sync failed'}`);
+    } finally {
+      setSyncingLists(false);
+      setTimeout(() => setSyncListsStatus(null), 5000);
+    }
   };
 
   // ─── Sync ────────────────────────────────────────────
@@ -331,10 +355,21 @@ export default function SidePanelApp() {
             <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs text-gray-500">
               <HiCheckCircle className="w-3.5 h-3.5 text-green-500" />
               <span className="flex-1">{repos.length} repos · {untaggedCount} untagged</span>
+              <button onClick={handleSyncToLists} disabled={syncingLists}
+                className="flex items-center gap-1 text-green-600 hover:bg-green-50 px-2 py-1 rounded transition-colors disabled:opacity-50">
+                <HiListBullet className="w-3.5 h-3.5" /> {syncingLists ? '...' : 'Lists'}
+              </button>
               <button onClick={handleSync} className="flex items-center gap-1 text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors">
                 <HiArrowPath className="w-3.5 h-3.5" /> Sync
               </button>
             </div>
+            {syncListsStatus && (
+              <div className={`text-xs px-3 py-1.5 rounded-lg ${
+                syncListsStatus.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+              }`}>
+                {syncListsStatus}
+              </div>
+            )}
 
             {/* Repo list */}
             {filteredRepos.length === 0 ? (

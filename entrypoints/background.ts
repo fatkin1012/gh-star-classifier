@@ -4,7 +4,7 @@
 
 import { defineBackground } from 'wxt/utils/define-background';
 import { db, getSettings, getCategoryStats } from '../utils/db';
-import { fullSync } from '../utils/sync';
+import { fullSync, syncToGitHubStarLists } from '../utils/sync';
 import { addTagsToRepo, removeTagsFromRepo } from '../utils/tags';
 
 export default defineBackground(() => {
@@ -75,6 +75,15 @@ export default defineBackground(() => {
           }
           const result = await fullSync(settings.githubToken);
           return { ok: true, result };
+        }
+
+        case 'SYNC_TO_LISTS': {
+          const s = await getSettings();
+          if (!s.githubToken) {
+            return { ok: false, error: 'Token not configured' };
+          }
+          const listsResult = await syncToGitHubStarLists(s.githubToken);
+          return { ok: true, result: listsResult };
         }
 
         case 'CHECK_STARRED': {
