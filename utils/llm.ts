@@ -54,7 +54,7 @@ export function getProviderDefaults(provider: LlmProvider): { model: string; bas
 
 // ─── Prompt templates ────────────────────────────────────────
 
-const DEFAULT_TAXONOMY_PROMPT = `You are a GitHub repository classifier. Analyze the repo and assign it to ONE of 5 categories plus relevant tags.
+const DEFAULT_TAXONOMY_PROMPT = `You are a GitHub repository classifier. Analyze the repo and assign it to ONE of the 5 categories below. Do NOT suggest tags — only category and subCategory.
 
 # Categories
 
@@ -81,15 +81,13 @@ Subcategories: shell-script, github-action, docker-config, dotfiles, vba-macro, 
 # Rules
 - Pick exactly ONE category and the most specific subcategory
 - If uncertain about subcategory, use empty string
-- Suggest 1-5 short tags (single or compound words like "machine-learning", "web-framework")
-- Tags should describe: primary language/framework → domain → use case → tooling
+- Do NOT output tags or suggest tags
 - Output ONLY valid JSON, no markdown fences, no extra text
 
 Response format:
 {
   "category": "applications-tools",
   "subCategory": "cli-tool",
-  "tags": ["python", "cli", "file-management"],
   "reasoning": "Brief explanation of category choice",
   "confidence": "high" | "medium" | "low"
 }
@@ -237,7 +235,8 @@ function buildPrompt(
     .replace('{readmeSummary}', readmeSummary.slice(0, 500));
 }
 
-/** Parse LLM response into AiSuggestion (tolerates markdown fences) */
+/** Parse LLM response into AiSuggestion (tolerates markdown fences).
+ *  v1.5: LLM no longer outputs tags — only category + subCategory.*/
 function parseSuggestion(raw: string): AiSuggestion {
   // Strip markdown code fences if present
   let cleaned = raw.trim();
@@ -253,7 +252,7 @@ function parseSuggestion(raw: string): AiSuggestion {
     return {
       category,
       subCategory,
-      tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+      tags: [],  // v1.5: AI no longer suggests tags; tags come from user/auto-rules only
       reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
       confidence: ['high', 'medium', 'low'].includes(parsed.confidence)
         ? parsed.confidence
@@ -261,39 +260,34 @@ function parseSuggestion(raw: string): AiSuggestion {
       analyzedAt: Date.now(),
     };
   } catch {
-    // Fallback: try to extract tags manually
-    const tagMatch = cleaned.match(/"tags"\s*:\s*\[([^\]]+)\]/);
-    const tags = tagMatch
-      ? tagMatch[1].split(',').map((t) => t.replace(/["'\s]/g, '')).filter(Boolean)
-      : [];
     return {
-      tags,
-      reasoning: 'Parsed from LLM output (fallback)',
+      tags: [],
+      reasoning: 'Failed to parse LLM response',
       confidence: 'low',
       analyzedAt: Date.now(),
     };
   }
 }
 
-/** Save AI suggestions to a repo in the database */
+/** Save AI category suggestions to a repo in the database.
+ *  v1.5: Only updates category/subCategory — never tags. */
 export async function saveAiSuggestion(repoId: number, suggestion: AiSuggestion): Promise<void> {
   const { db } = await import('./db');
   const repo = await db.repos.get(repoId);
   if (!repo) return;
 
-  // Merge AI suggestions into tags (without overwriting existing)
-  const existingTags = new Set(repo.tags);
-  const newTags = suggestion.tags.filter((t) => !existingTags.has(t));
-
-  // Store suggestion metadata via a custom field (we'll use a separate table for AI cache)
-  await db.repos.update(repoId, {
-    tags: [...repo.tags, ...newTags],
-  });
+  // v1.5: AI no longer adds tags; only update category/subCategory when LLM provides them
+  const updates: Partial<import('./types').TaggedRepo> = {};
+  if (suggestion.category) updates.category = suggestion.category;
+  if (suggestion.subCategory) updates.subCategory = suggestion.subCategory;
+  if (Object.keys(updates).length > 0) {
+    await db.repos.update(repoId, updates);
+  }
 }
 
 /**
- * Analyze a single repo with LLM (legacy — tags only).
- * For unified classification (category + tags) use classifyRepoWithLLM instead.
+ * Analyze a single repo with LLM (category only — no tags).
+ * v1.5: LLM no longer suggests tags.
  */
 export async function analyzeRepo(
   repo: TaggedRepo,
@@ -306,15 +300,14 @@ export async function analyzeRepo(
 }
 
 /**
- * Unified LLM classification: returns category + subCategory + tags in one call.
- * This is the main entry point for v1.4 unified AI classification.
+ * Unified LLM classification: returns category + subCategory (no tags).
+ * This is the main entry point for v1.5 AI-only-classification.
  */
 export async function classifyRepoWithLLM(
   repo: TaggedRepo,
   readmeSummary: string,
   config: LlmConfig,
 ): Promise<AiSuggestion> {
-  // Build a prompt focused on category selection + tags
   const prompt = buildPrompt(repo, readmeSummary, config.customPrompt);
   const raw = await callLlm(prompt, config);
   return parseSuggestion(raw);

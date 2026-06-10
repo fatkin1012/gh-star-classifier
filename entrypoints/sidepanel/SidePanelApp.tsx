@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import {
   HiStar, HiCog6Tooth, HiSparkles, HiMagnifyingGlass,
   HiFunnel, HiArrowPath, HiCheckCircle, HiTag, HiBars3,
@@ -16,13 +17,14 @@ type PanelTab = 'repos' | 'ai' | 'settings';
 
 export default function SidePanelApp() {
   const [tab, setTab] = useState<PanelTab>('repos');
-  const [repos, setRepos] = useState<TaggedRepo[]>([]);
-  const [allTags, setAllTags] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  // v1.1: Category stats
-  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
-  const [uncategorizedCount, setUncategorizedCount] = useState(0);
+  // v1.5: useLiveQuery for real-time DB reactivity
+  const repos = useLiveQuery(() => db.repos.toArray()) ?? [];
+  const allTags = useLiveQuery(async () => (await getAllTags())) ?? [];
+  const categoryStats = useLiveQuery(async () => (await getCategoryStats())) ?? { categoryCounts: {} as Record<string, number>, uncategorized: 0 };
+  const categoryCounts = categoryStats.categoryCounts;
+  const uncategorizedCount = categoryStats.uncategorized;
+  const loading = false; // v1.5: useLiveQuery is synchronous-first, no manual loading state needed
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -34,7 +36,6 @@ export default function SidePanelApp() {
   // AI
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
-  const [aiSuggestions, setAiSuggestions] = useState<Map<number, string[]>>(new Map());
 
   // Settings
   const [githubToken, setGithubToken] = useState('');
@@ -50,15 +51,10 @@ export default function SidePanelApp() {
   const [llmValidating, setLlmValidating] = useState(false);
   const [tokenSaved, setTokenSaved] = useState(false);
 
-  // ─── Data loading ────────────────────────────────────
+  // ─── v1.5: Data loading via useLiveQuery ────────────
 
-  const loadData = useCallback(async () => {
-    setRepos(await db.repos.toArray());
-    setAllTags(await getAllTags());
-    const catStats = await getCategoryStats();
-    setCategoryCounts(catStats.categoryCounts);
-    setUncategorizedCount(catStats.uncategorized);
-  }, []);
+  // loadData no longer needed — useLiveQuery handles real-time repo/tag data
+  const loadData = useCallback(async () => {}, []);
 
   const loadSettings = useCallback(async () => {
     const s = await getSettings();
@@ -74,8 +70,8 @@ export default function SidePanelApp() {
   }, []);
 
   useEffect(() => {
-    Promise.all([loadData(), loadSettings()]).finally(() => setLoading(false));
-  }, [loadData, loadSettings]);
+    loadSettings();
+  }, [loadSettings]);
 
   const untaggedCount = repos.filter((r) => r.tags.length === 0).length;
 
@@ -158,18 +154,17 @@ export default function SidePanelApp() {
     const s = await getSettings();
     if (!s.githubToken) return;
     setIsSyncing(true);
-    setLoading(true);
     try {
       await fullSync(s.githubToken);
       await loadData();
     } finally {
       setIsSyncing(false);
-      setLoading(false);
     }
   };
 
   // ─── AI ──────────────────────────────────────────────
 
+  /** v1.5: AI batch now classifies repos (category + subCategory), no tag suggestions */
   const handleAiBatch = async () => {
     const s = await getSettings();
     if (!s.llm.apiKey) {
@@ -177,53 +172,35 @@ export default function SidePanelApp() {
       return;
     }
     setAiAnalyzing(true);
-    setAiStatus('Starting AI analysis...');
-    const unordered = repos.filter((r) => r.tags.length === 0).slice(0, s.llm.batchSize);
+    setAiStatus('Starting AI classification...');
+    const unclassified = repos.filter((r) => !r.category || r.category === 'uncategorized' || r.category === '').slice(0, s.llm.batchSize);
 
-    for (let i = 0; i < unordered.length; i++) {
-      const repo = unordered[i];
-      setAiStatus(`Analyzing ${i + 1}/${unordered.length}: ${repo.fullName}`);
+    let classified = 0;
+    for (let i = 0; i < unclassified.length; i++) {
+      const repo = unclassified[i];
+      setAiStatus(`Classifying ${i + 1}/${unclassified.length}: ${repo.fullName}`);
       try {
-        const cached = await getAiCache(repo.id);
-        if (cached && cached.tags.length > 0) {
-          setAiSuggestions((prev) => {
-            const next = new Map(prev);
-            next.set(repo.id, cached.tags);
-            return next;
-          });
-          continue;
-        }
-        // Note: Using classifyRepoWithLLM for quick tag suggestions on untagged repos.
-        // This is intentional — classification (category+subCategory) already happens
-        // during sync; here we only suggest missing tags.
         const readmeSummary = await fetchReadmeSummary(repo);
         const suggestion = await classifyRepoWithLLM(repo, readmeSummary, s.llm);
         await setAiCache(repo.id, { ...suggestion, analyzedAt: Date.now() });
-        if (suggestion.tags.length > 0) {
-          setAiSuggestions((prev) => {
-            const next = new Map(prev);
-            next.set(repo.id, suggestion.tags);
-            return next;
+
+        if (suggestion.category && suggestion.category !== 'uncategorized') {
+          const { db } = await import('../../utils/db');
+          await db.repos.update(repo.id, {
+            category: suggestion.category,
+            subCategory: suggestion.subCategory || '',
           });
+          classified++;
         }
       } catch (err) {
         console.error(`[AI] Failed on ${repo.fullName}:`, err);
       }
-      if (i < unordered.length - 1) await new Promise((r) => setTimeout(r, 800));
+      if (i < unclassified.length - 1) await new Promise((r) => setTimeout(r, 800));
     }
-    setAiStatus(`✓ Analyzed ${unordered.length} repos`);
+    await loadData();
+    setAiStatus(`✓ Classified ${classified}/${unclassified.length} repos`);
     setAiAnalyzing(false);
     setTimeout(() => setAiStatus(null), 5000);
-  };
-
-  const handleApplyAi = async (repoId: number, tags: string[]) => {
-    await addTagsToRepo(repoId, tags);
-    setAiSuggestions((prev) => {
-      const next = new Map(prev);
-      next.delete(repoId);
-      return next;
-    });
-    await loadData();
   };
 
   // ─── Settings ────────────────────────────────────────
@@ -273,14 +250,6 @@ export default function SidePanelApp() {
   };
 
   // ─── Render ──────────────────────────────────────────
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-white">
-        <HiArrowPath className="w-6 h-6 text-blue-500 animate-spin" />
-      </div>
-    );
-  }
 
   return (
     <div className="h-screen flex flex-col bg-white text-gray-800">
@@ -393,10 +362,10 @@ export default function SidePanelApp() {
                   <RepoRow
                     key={repo.id}
                     repo={repo}
-                    aiSuggestion={aiSuggestions.get(repo.id) ?? null}
+                    aiSuggestion={null}
                     onAddTags={handleAddTags}
                     onRemoveTag={handleRemoveTag}
-                    onApplyAi={handleApplyAi}
+                    onApplyAi={(_id, _tags) => {}}
                   />
                 ))}
               </div>
@@ -418,37 +387,13 @@ export default function SidePanelApp() {
             <button onClick={handleAiBatch} disabled={aiAnalyzing}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors text-sm font-medium">
               <HiSparkles className="w-5 h-5" />
-              {aiAnalyzing ? 'Analyzing...' : `AI Classify ${untaggedCount} Untagged Repos`}
+              {aiAnalyzing ? 'Classifying...' : `AI Classify Uncategorized Repos`}
             </button>
 
             {aiStatus && (
               <div className={`text-xs px-3 py-2 rounded-lg ${
                 aiStatus.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'
               }`}>{aiStatus}</div>
-            )}
-
-            {aiSuggestions.size > 0 && (
-              <div className="space-y-2">
-                <h3 className="text-xs font-semibold text-gray-600">Pending Suggestions</h3>
-                {[...aiSuggestions.entries()].map(([repoId, tags]) => {
-                  const repo = repos.find((r) => r.id === repoId);
-                  if (!repo) return null;
-                  return (
-                    <div key={repoId} className="p-3 bg-purple-50 rounded-lg border border-purple-200">
-                      <p className="text-xs font-medium text-purple-800 truncate">{repo.fullName}</p>
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {tags.map((t) => (
-                          <span key={t} className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">{t}</span>
-                        ))}
-                      </div>
-                      <button onClick={() => handleApplyAi(repoId, tags)}
-                        className="mt-2 text-xs px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors">
-                        Apply Tags
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
             )}
           </div>
         )}

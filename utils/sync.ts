@@ -72,7 +72,7 @@ export async function fullSync(token: string): Promise<{
     let subCategory: string;
 
     if (isNew && useLLM) {
-      // ─── v1.4: AI-first classification (category + tags in one call) ───
+      // ─── v1.5: AI-only classification (category + subCategory, no tags) ───
       try {
         const tagged: TaggedRepo = {
           ...raw, tags: [], category: '', subCategory: '', dynamicCategory: '', lastSyncedAt: Date.now(),
@@ -83,15 +83,9 @@ export async function fullSync(token: string): Promise<{
         category = suggestion.category || '';
         subCategory = suggestion.subCategory || '';
 
-        if (suggestion.tags.length > 0) {
-          const tagSet = new Set(tags);
-          for (const t of suggestion.tags) tagSet.add(t);
-          tags = [...tagSet];
-          autoTagged += suggestion.tags.length;
-
-          // Cache the AI suggestion
-          await setAiCache(raw.id, { ...suggestion, analyzedAt: Date.now() });
-        }
+        // v1.5: LLM no longer suggests tags — only category/subCategory
+        // Cache the AI suggestion for reference
+        await setAiCache(raw.id, { ...suggestion, analyzedAt: Date.now() });
 
         // Validate category against known taxonomy
         const validCategories = [

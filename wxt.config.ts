@@ -10,7 +10,10 @@ export default defineConfig({
   manifest: {
     name: 'GitHub Star Classifier',
     description: 'Organize, tag, and classify your GitHub starred repos',
-    version: '1.4.1',
+    version: '1.5.0',
+    action: {
+      default_title: 'Star Classifier',
+    },
     permissions: [
       'storage',
       'alarms',
@@ -20,9 +23,6 @@ export default defineConfig({
       'https://api.github.com/*',
       'https://github.com/*',
     ],
-    action: {
-      default_title: 'Star Classifier',
-    },
     side_panel: {
       default_path: 'sidepanel.html',
     },

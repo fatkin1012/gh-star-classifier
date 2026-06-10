@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { HiCog6Tooth, HiSparkles, HiBars3CenterLeft, HiShieldCheck, HiListBullet } from 'react-icons/hi2';
-import { db, getSettings, updateSettings, getAiCache, setAiCache, getUnanalyzedRepos, getCategoryStats } from '../../utils/db';
+import { db, getSettings, updateSettings, getCategoryStats } from '../../utils/db';
 import { getAllTags, addTagsToRepo, removeTagsFromRepo, bulkTagRepos } from '../../utils/tags';
 import { fullSync, syncToGitHubStarLists } from '../../utils/sync';
 import { validateLlmConfig, getProviderDefaults } from '../../utils/llm';
@@ -17,13 +18,33 @@ type Tab = 'repos' | 'settings';
 
 export default function PopupApp() {
   const [tab, setTab] = useState<Tab>('repos');
-  const [repos, setRepos] = useState<TaggedRepo[]>([]);
-  const [allTags, setAllTags] = useState<string[]>([]);
-  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
 
-  // v1.1: Category stats
-  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
-  const [uncategorizedCount, setUncategorizedCount] = useState(0);
+  // v1.5: useLiveQuery for real-time DB reactivity — auto-refreshes on DB changes
+  // v1.5 perf: Load first 50 recent repos for fast paint, then background-load full list
+  const [initialRepos, setInitialRepos] = useState<TaggedRepo[] | null>(null);
+  const repos = useLiveQuery(() => db.repos.toArray());
+
+  useEffect(() => {
+    // Fast first render: load top 50 by starredAt while awaiting full list
+    if (!repos) {
+      db.repos.orderBy('starredAt').reverse().limit(50).toArray().then(setInitialRepos);
+    } else {
+      setInitialRepos(null); // full list is ready
+    }
+  }, [repos]);
+
+  // Use fast partial list for first paint, then switch to full reactive list
+  const displayRepos = repos ?? initialRepos ?? [];
+  const isFirstPaint = repos === undefined;
+
+  const allTags = useLiveQuery(async () => (await getAllTags())) ?? [];
+  // v1.5: Category stats from live query
+  const categoryStats = useLiveQuery(async () => (await getCategoryStats())) ?? { categoryCounts: {} as Record<string, number>, uncategorized: 0 };
+  const categoryCounts = categoryStats.categoryCounts;
+  const uncategorizedCount = categoryStats.uncategorized;
+  const totalRepoCount = Object.values(categoryCounts).reduce((a, b) => a + b, 0) + uncategorizedCount;
+
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -59,14 +80,8 @@ export default function PopupApp() {
   const [llmValidating, setLlmValidating] = useState(false);
   const [llmStatus, setLlmStatus] = useState<{ ok: boolean; message: string } | null>(null);
 
-  const loadData = useCallback(async () => {
-    const allRepos = await db.repos.toArray();
-    setRepos(allRepos);
-    setAllTags(await getAllTags());
-    const catStats = await getCategoryStats();
-    setCategoryCounts(catStats.categoryCounts);
-    setUncategorizedCount(catStats.uncategorized);
-  }, []);
+  // v1.5: loadData is a no-op — useLiveQuery handles real-time repo/tag data
+  const loadData = useCallback(async () => {}, []);
 
   const loadSettings = useCallback(async () => {
     const s = await getSettings();
@@ -85,12 +100,11 @@ export default function PopupApp() {
   }, []);
 
   useEffect(() => {
-    loadData();
     loadSettings();
-  }, [loadData, loadSettings]);
+  }, [loadSettings]);
 
   const filteredRepos = useMemo(() => {
-    let result = repos;
+    let result = displayRepos;
 
     // Apply category filter
     if (filterCategory) {
@@ -124,7 +138,7 @@ export default function PopupApp() {
       );
     }
     return result.sort((a, b) => b.stars - a.stars);
-  }, [repos, selectedTag, searchQuery, filterCategory, filterSubCategory]);
+  }, [displayRepos, selectedTag, searchQuery, filterCategory, filterSubCategory]);
 
   const getLastSync = useCallback(async () => {
     const newest = await db.repos.orderBy('lastSyncedAt').last();
@@ -283,7 +297,7 @@ export default function PopupApp() {
   }, [getLastSync]);
 
   return (
-    <div className="w-[480px] h-[600px] flex flex-col bg-white">
+    <div className="w-[480px] h-[600px] flex flex-col bg-white resize overflow-auto">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
         <h1 className="font-bold text-base text-gray-800">⭐ Star Classifier</h1>
@@ -320,7 +334,7 @@ export default function PopupApp() {
           <div className="space-y-3">
             <SyncStatus
               lastSyncedAt={lastSyncedAt}
-              totalCount={repos.length}
+              totalCount={totalRepoCount || displayRepos.length}
               onSync={handleSync}
             />
 
@@ -360,33 +374,40 @@ export default function PopupApp() {
               </div>
             )}
 
-            <FilterBar
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              selectedTag={selectedTag}
-              allTags={allTags}
-              onTagFilter={setSelectedTag}
-              activeCategory={filterCategory}
-              onCategorySelect={setFilterCategory}
-              activeSubCategory={filterSubCategory}
-              onSubCategorySelect={setFilterSubCategory}
-              categoryCounts={categoryCounts}
-              uncategorizedCount={uncategorizedCount}
-            />
-            <ExportImport onImportComplete={loadData} />
-            <AiAnalyzer
-              repos={repos}
-              onApplySuggestion={handleApplyAiSuggestion}
-              onDataChanged={loadData}
-            />
-            <RepoList
-              repos={filteredRepos}
-              allTags={allTags}
-              onAddTags={handleAddTags}
-              onRemoveTag={handleRemoveTag}
-              onBulkTag={handleBulkTag}
-              onAiSuggest={handleApplyAiSuggestion}
-            />
+            {/* v1.5: Skeleton loader during first paint */}
+            {isFirstPaint ? (
+              <SkeletonLoader count={5} />
+            ) : (
+              <>
+                <FilterBar
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  selectedTag={selectedTag}
+                  allTags={allTags}
+                  onTagFilter={setSelectedTag}
+                  activeCategory={filterCategory}
+                  onCategorySelect={setFilterCategory}
+                  activeSubCategory={filterSubCategory}
+                  onSubCategorySelect={setFilterSubCategory}
+                  categoryCounts={categoryCounts}
+                  uncategorizedCount={uncategorizedCount}
+                />
+                <ExportImport onImportComplete={loadData} />
+                <AiAnalyzer
+                  repos={displayRepos}
+                  onApplySuggestion={handleApplyAiSuggestion}
+                  onDataChanged={loadData}
+                />
+                <RepoList
+                  repos={filteredRepos}
+                  allTags={allTags}
+                  onAddTags={handleAddTags}
+                  onRemoveTag={handleRemoveTag}
+                  onBulkTag={handleBulkTag}
+                  onAiSuggest={handleApplyAiSuggestion}
+                />
+              </>
+            )}
           </div>
         )}
 
@@ -622,6 +643,32 @@ export default function PopupApp() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── v1.5: Skeleton loader for initial loading ──────────────────
+
+function SkeletonLoader({ count = 3 }: { count?: number }) {
+  return (
+    <div className="space-y-2 animate-pulse">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="p-3 rounded-lg border border-gray-200">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-gray-200 flex-shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 bg-gray-200 rounded w-3/4" />
+              <div className="h-3 bg-gray-200 rounded w-full" />
+              <div className="h-3 bg-gray-200 rounded w-1/2" />
+              <div className="flex gap-1">
+                <div className="h-5 bg-gray-200 rounded-full w-16" />
+                <div className="h-5 bg-gray-200 rounded-full w-20" />
+                <div className="h-5 bg-gray-200 rounded-full w-14" />
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

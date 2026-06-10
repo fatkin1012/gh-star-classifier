@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { HiPlus, HiTrash, HiPencil, HiXMark } from 'react-icons/hi2';
+import { HiPlus, HiTrash, HiPencil, HiXMark, HiSparkles } from 'react-icons/hi2';
 import { db, getSettings, updateSettings, getCategoryStats, getDynamicCategories, getDynamicCategoryStats, deleteDynamicCategory, renameDynamicCategory } from '../../utils/db';
 import { checkTokenScopes } from '../../utils/github';
+import { classifyRepoWithLLM, fetchReadmeSummary } from '../../utils/llm';
+import { classifyRepoSync } from '../../utils/classify';
 import { CATEGORIES } from '../../utils/classify';
 import type { AutoTagRule } from '../../utils/types';
 
@@ -288,6 +290,19 @@ export default function OptionsApp() {
         </section>
       )}
 
+      {/* v1.5: Re-AI classify all stars button */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-gray-700 flex items-center gap-2">
+          <HiSparkles className="w-5 h-5 text-purple-500" />
+          AI Re-Classification
+        </h2>
+        <p className="text-xs text-gray-500">
+          Re-classify all repos using the configured LLM. This will update category and subCategory
+          for every repo in your database. Progress is shown below.
+        </p>
+        <RecategorizeButton />
+      </section>
+
       {/* Auto-classify Rules */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-gray-700">Auto-Classify Rules</h2>
@@ -386,8 +401,128 @@ export default function OptionsApp() {
 
       {/* Footer */}
       <p className="text-xs text-gray-400 text-center pt-4 border-t border-gray-100">
-        GitHub Star Classifier v1.3.0
+        GitHub Star Classifier v1.5.0
       </p>
+    </div>
+  );
+}
+
+// ─── v1.5: Re-categorize all repos button ────────────────────────
+
+function RecategorizeButton() {
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+
+  const handleRecategorize = async () => {
+    const settings = await getSettings();
+    if (!settings.llm.apiKey) {
+      setResult('⚠️ Please configure an AI provider API key in the popup settings first.');
+      return;
+    }
+
+    setRunning(true);
+    setProgress(null);
+    setResult(null);
+
+    const allRepos = await db.repos.toArray();
+    const total = allRepos.length;
+    let success = 0;
+    let failed = 0;
+
+    setProgress({ done: 0, total });
+
+    for (let i = 0; i < total; i++) {
+      const repo = allRepos[i];
+      setProgress({ done: i + 1, total });
+
+      try {
+        const readmeSummary = await fetchReadmeSummary(repo);
+        const suggestion = await classifyRepoWithLLM(repo, readmeSummary, settings.llm);
+
+        if (suggestion.category && suggestion.category !== 'uncategorized') {
+          await db.repos.update(repo.id, {
+            category: suggestion.category,
+            subCategory: suggestion.subCategory || '',
+          });
+          success++;
+        } else {
+          // LLM returned uncategorized — use rule-based as fallback
+          const fallback = classifyRepoSync({
+            name: repo.name,
+            fullName: repo.fullName,
+            description: repo.description || '',
+            language: repo.language || '',
+            topics: repo.topics,
+          });
+          await db.repos.update(repo.id, {
+            category: fallback.category,
+            subCategory: fallback.subCategory || '',
+          });
+          success++;
+        }
+      } catch (err) {
+        console.error(`[ReCategorize] Failed on ${repo.fullName}:`, err);
+        // Fallback to rule-based on error
+        try {
+          const fallback = classifyRepoSync({
+            name: repo.name,
+            fullName: repo.fullName,
+            description: repo.description || '',
+            language: repo.language || '',
+            topics: repo.topics,
+          });
+          await db.repos.update(repo.id, {
+            category: fallback.category,
+            subCategory: fallback.subCategory || '',
+          });
+          success++;
+        } catch {
+          failed++;
+        }
+      }
+
+      // Small delay to avoid rate limits
+      if (i < total - 1) await new Promise((r) => setTimeout(r, 500));
+    }
+
+    setRunning(false);
+    setResult(`✓ Done! Success: ${success}, Failed: ${failed}`);
+    setTimeout(() => setResult(null), 10000);
+  };
+
+  return (
+    <div className="space-y-3">
+      <button
+        onClick={handleRecategorize}
+        disabled={running}
+        className="flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium w-full"
+      >
+        <HiSparkles className={`w-5 h-5 ${running ? 'animate-pulse' : ''}`} />
+        {running ? 'Re-classifying...' : '🤖 Re-AI Classify All Stars'}
+      </button>
+
+      {/* Progress bar */}
+      {progress && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-gray-500">
+            <span>Processing repos...</span>
+            <span>{progress.done} / {progress.total}</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+            <div
+              className="bg-purple-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${(progress.done / progress.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {result && (
+        <div className="text-xs px-3 py-2 rounded-lg bg-green-50 text-green-700">
+          {result}
+        </div>
+      )}
     </div>
   );
 }

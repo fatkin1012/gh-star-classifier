@@ -4,8 +4,8 @@ import type { TaggedRepo } from '../utils/types';
 import TagBadge from './TagBadge';
 import TagInput from './TagInput';
 import { getSettings, getAiCache, setAiCache } from '../utils/db';
-import { analyzeRepo, fetchReadmeSummary } from '../utils/llm';
-import { getCategoryInfo, getSubCategoryLabel } from '../utils/classify';
+import { classifyRepoWithLLM, fetchReadmeSummary } from '../utils/llm';
+import { classifyRepoSync, getCategoryInfo, getSubCategoryLabel } from '../utils/classify';
 
 interface RepoCardProps {
   repo: TaggedRepo;
@@ -23,16 +23,17 @@ export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, select
   const [aiSuggestion, setAiSuggestion] = useState<string[] | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  // Load cached AI suggestion on mount
+  // Load cached AI suggestion on mount (legacy — may have tags from older versions)
   useEffect(() => {
     getAiCache(repo.id).then((cached) => {
-      if (cached && cached.tags.length > 0) {
+      if (cached && cached.tags && cached.tags.length > 0) {
         setAiSuggestion(cached.tags);
       }
     });
   }, [repo.id]);
 
-  const handleAiSuggest = async () => {
+  // v1.5: AI button now does classification, not tag suggestion
+  const handleAiClassify = async () => {
     setAiAnalyzing(true);
     setAiError(null);
     try {
@@ -43,24 +44,23 @@ export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, select
         return;
       }
 
-      // Check cache first
-      const cached = await getAiCache(repo.id);
-      if (cached && cached.tags.length > 0) {
-        setAiSuggestion(cached.tags);
-        setAiAnalyzing(false);
-        return;
-      }
-
       const readmeSummary = await fetchReadmeSummary(repo);
-      const suggestion = await analyzeRepo(repo, readmeSummary, settings.llm);
+      const suggestion = await classifyRepoWithLLM(repo, readmeSummary, settings.llm);
 
       // Cache the result
       await setAiCache(repo.id, { ...suggestion, analyzedAt: Date.now() });
 
-      if (suggestion.tags.length > 0) {
-        setAiSuggestion(suggestion.tags);
+      // v1.5: Only update category/subCategory
+      if (suggestion.category && suggestion.category !== 'uncategorized') {
+        const { db } = await import('../utils/db');
+        await db.repos.update(repo.id, {
+          category: suggestion.category,
+          subCategory: suggestion.subCategory || '',
+        });
+        // Reload the page to reflect new category
+        window.location.reload();
       } else {
-        setAiError('AI returned no tags');
+        setAiError('AI returned uncategorized — try a different repo');
       }
     } catch (err) {
       setAiError(err instanceof Error ? err.message : 'AI analysis failed');
@@ -166,12 +166,12 @@ export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, select
             >
               + tag
             </button>
-            {/* AI Suggest button */}
+            {/* v1.5: AI button now classifies repo (no tag suggestions) */}
             <button
-              onClick={handleAiSuggest}
+              onClick={handleAiClassify}
               disabled={aiAnalyzing}
               className="text-xs text-purple-500 hover:text-purple-700 transition-colors px-1.5 py-0.5 rounded hover:bg-purple-50 flex items-center gap-1"
-              title="AI suggest tags"
+              title="AI classify repo"
             >
               {aiAnalyzing ? (
                 <HiArrowPath className="w-3.5 h-3.5 animate-spin" />
@@ -197,11 +197,11 @@ export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, select
             </div>
           )}
 
-          {/* AI suggestion display */}
+          {/* Legacy AI suggestion display (from earlier cache) */}
           {aiSuggestion && newAiTags.length > 0 && !aiAnalyzing && (
             <div className="mt-2 p-2 bg-purple-50 rounded-lg border border-purple-200">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-purple-700">🤖 AI suggests:</span>
+                <span className="text-xs font-medium text-purple-700">🤖 Previously suggested tags:</span>
                 <button
                   onClick={applyAiTags}
                   className="text-xs px-2 py-0.5 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
@@ -226,14 +226,6 @@ export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, select
                   );
                 })}
               </div>
-            </div>
-          )}
-
-          {/* AI already applied */}
-          {aiSuggestion && newAiTags.length === 0 && !aiAnalyzing && (
-            <div className="mt-1 text-xs text-purple-400 flex items-center gap-1">
-              <HiSparkles className="w-3 h-3" />
-              Tags already applied
             </div>
           )}
 
