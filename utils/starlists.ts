@@ -17,6 +17,52 @@
 import { getCachedListId, setCachedListId } from './db';
 import { getOctokit } from './github';
 
+// ─────── Scope error detection ───────
+
+const SCOPE_ERROR_PATTERNS = [
+  'requires the `user` scope',
+  'requires one or more scopes',
+  'insufficient_scope',
+  'not permitted',
+  'does not have the required',
+];
+
+/**
+ * Check if a GraphQL error is caused by missing token scopes.
+ * These errors should be handled silently rather than logged as failures.
+ */
+export function isScopeError(error: unknown): boolean {
+  const msg =
+    error instanceof Error
+      ? error.message.toLowerCase()
+      : String(error).toLowerCase();
+  return SCOPE_ERROR_PATTERNS.some((p) => msg.includes(p));
+}
+
+// ─────── Empty-data error dedup ───────
+
+let _emptyDataLogCount = 0;
+let _emptyDataLogMax = 3;
+
+/**
+ * Reset the empty-data error log counter.
+ * Call at the start of a full-sync to get fresh per-sync dedup.
+ */
+export function resetEmptyDataLog(): void {
+  _emptyDataLogCount = 0;
+}
+
+function logEmptyDataOnce(err: unknown, context?: string): void {
+  if (_emptyDataLogCount < _emptyDataLogMax) {
+    const prefix = context ? `[StarLists:${context}]` : '[StarLists]';
+    console.warn(`${prefix} Empty data returned (possible invalid nodeId)`, err);
+    _emptyDataLogCount++;
+    if (_emptyDataLogCount === _emptyDataLogMax) {
+      console.warn('[StarLists] Suppressing further empty-data warnings for this batch');
+    }
+  }
+}
+
 // ─────── Category → List name mapping ───────
 
 export const CATEGORY_LIST_NAMES: Record<string, string> = {
@@ -54,7 +100,12 @@ async function graphql<T>(token: string, query: string, variables?: Record<strin
 
   if (json.errors) {
     const messages = json.errors.map((e) => e.message).join('; ');
-    throw new Error(`GitHub GraphQL error: ${messages}`);
+    const err = new Error(`GitHub GraphQL error: ${messages}`);
+    // Preserve scope information for downstream detection
+    if (isScopeError(messages)) {
+      (err as Error & { scopeError: boolean }).scopeError = true;
+    }
+    throw err;
   }
 
   if (!json.data) {
@@ -229,7 +280,16 @@ export async function addRepoToList(
 
     return mutateResult.updateUserListsForItem.lists.some((l) => l.id === listId);
   } catch (err) {
-    console.error('[StarLists] Failed to add repo to list:', err);
+    if (isScopeError(err)) {
+      // Scope errors are handled silently — user will see the banner in options page
+      return false;
+    }
+    // Empty data typically means the nodeId is stale/invalid for this repo
+    if ((err instanceof Error && err.message.includes('empty data')) || String(err).includes('empty data')) {
+      logEmptyDataOnce(err, 'addRepoToList');
+      return false;
+    }
+    console.warn('[StarLists] Failed to add repo to list:', err instanceof Error ? err.message : err);
     return false;
   }
 }
@@ -268,7 +328,11 @@ export async function removeRepoFromAllLists(
 
     return true;
   } catch (err) {
-    console.error('[StarLists] Failed to remove repo from lists:', err);
+    if (isScopeError(err)) {
+      // Scope errors are handled silently
+      return false;
+    }
+    console.warn('[StarLists] Failed to remove repo from lists:', err instanceof Error ? err.message : err);
     return false;
   }
 }
@@ -294,7 +358,11 @@ export async function deleteList(token: string, listId: string): Promise<boolean
     await graphql<DeleteListResult>(token, mutation, { listId });
     return true;
   } catch (err) {
-    console.error('[StarLists] Failed to delete list:', err);
+    if (isScopeError(err)) {
+      // Scope errors are handled silently
+      return false;
+    }
+    console.warn('[StarLists] Failed to delete list:', err instanceof Error ? err.message : err);
     return false;
   }
 }

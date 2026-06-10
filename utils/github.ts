@@ -98,6 +98,40 @@ function convertRepos(items: Array<Record<string, unknown>>): StarredRepo[] {
   }));
 }
 
+/**
+ * Check which OAuth scopes a token has via REST API HEAD request.
+ * GitHub returns the scopes in the X-OAuth-Scopes response header
+ * for any authenticated endpoint.
+ */
+export async function checkTokenScopes(token: string): Promise<{
+  scopes: string[];
+  hasUserScope: boolean;
+}> {
+  try {
+    const response = await fetch('https://api.github.com/user', {
+      method: 'HEAD',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'User-Agent': 'gh-star-classifier/1.2',
+      },
+    });
+
+    const scopeHeader = response.headers.get('X-OAuth-Scopes');
+    const scopes = scopeHeader
+      ? scopeHeader.split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
+
+    return {
+      scopes,
+      hasUserScope: scopes.includes('user') || scopes.includes('user:read'),
+    };
+  } catch (err) {
+    console.warn('[GitHub] Failed to check token scopes:', err);
+    return { scopes: [], hasUserScope: false };
+  }
+}
+
 /** Verify that a GitHub token is valid (returns the username) */
 export async function verifyToken(token: string): Promise<string | null> {
   try {

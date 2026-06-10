@@ -85,6 +85,8 @@ export interface AppSettings {
   llm: LlmSettings;
   /** If true, sync classification to GitHub star lists */
   syncToGitHubLists: boolean;
+  /** Cached result of scope check: true if token has 'user' scope for GitHub Lists API */
+  tokenHasUserScope: boolean;
 }
 
 export const DEFAULT_LLM_SETTINGS: LlmSettings = {
@@ -105,4 +107,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   newStarDefaultTags: [],
   llm: { ...DEFAULT_LLM_SETTINGS },
   syncToGitHubLists: true,
+  tokenHasUserScope: true,
 };

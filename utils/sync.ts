@@ -2,11 +2,15 @@
 // Background sync — detect new stars and auto-classify
 // ============================================================
 
-import { db, getSettings, applyAutoRules, setAiCache } from './db';
-import { fetchAllStars } from './github';
+import { db, getSettings, updateSettings, applyAutoRules, setAiCache } from './db';
+import { fetchAllStars, checkTokenScopes } from './github';
 import { analyzeRepo, fetchReadmeSummary } from './llm';
 import { classifyRepo } from './classify';
-import { ensureCategoryList, addRepoToList } from './starlists';
+import {
+  ensureCategoryList,
+  addRepoToList,
+  resetEmptyDataLog,
+} from './starlists';
 import type { TaggedRepo } from './types';
 
 /**
@@ -19,6 +23,21 @@ export async function fullSync(token: string): Promise<{
   autoTagged: number;
 }> {
   const settings = await getSettings();
+
+  // ─── Scope check: skip GitHub Lists sync if token lacks 'user' scope ───
+  let tokenHasUserScope = settings.tokenHasUserScope ?? true;
+  if (settings.syncToGitHubLists && token) {
+    const scopeResult = await checkTokenScopes(token);
+    tokenHasUserScope = scopeResult.hasUserScope;
+    if (!tokenHasUserScope) {
+      console.info('[Sync] Token lacks "user" scope — skipping GitHub Lists sync (silent)');
+    }
+    // Persist the scope check so the options page can read it
+    await updateSettings({ tokenHasUserScope });
+  }
+
+  // Reset empty-data log counter for this sync cycle
+  resetEmptyDataLog();
 
   // Find the newest starredAt we already have
   const newest = await db.repos
@@ -75,7 +94,7 @@ export async function fullSync(token: string): Promise<{
     await db.repos.put({ ...raw, tags, category, subCategory, lastSyncedAt: Date.now() }, raw.id);
 
     // ─── Sync to GitHub star lists (v1.2) ─────────────────────
-    if (settings.syncToGitHubLists && category && category !== 'uncategorized' && raw.nodeId) {
+    if (settings.syncToGitHubLists && tokenHasUserScope && category && category !== 'uncategorized' && raw.nodeId) {
       try {
         // Get or create the category list (cached per category per sync)
         if (!listIdCache.has(category)) {
@@ -85,7 +104,11 @@ export async function fullSync(token: string): Promise<{
         const listId = listIdCache.get(category)!;
         await addRepoToList(token, listId, raw.nodeId);
       } catch (err) {
-        console.error(`[Sync] Failed to sync ${raw.fullName} to star list:`, err);
+        // Individual failures are already handled in starlists.ts
+        // Log a brief warning only for non-scope, non-empty-data errors
+        if (!(err instanceof Error && (err.message.includes('scope') || err.message.includes('empty data')))) {
+          console.warn(`[Sync] Could not sync ${raw.fullName}: ${err instanceof Error ? err.message : err}`);
+        }
       }
     }
   }

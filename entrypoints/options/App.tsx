@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { HiPlus, HiTrash } from 'react-icons/hi2';
 import { db, getSettings, updateSettings, getCategoryStats } from '../../utils/db';
+import { checkTokenScopes } from '../../utils/github';
 import { CATEGORIES } from '../../utils/classify';
 import type { AutoTagRule } from '../../utils/types';
 
@@ -18,12 +19,25 @@ export default function OptionsApp() {
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
   const [syncToGitHubLists, setSyncToGitHubLists] = useState(true);
+  const [tokenHasUserScope, setTokenHasUserScope] = useState(true);
+  const [scopeChecked, setScopeChecked] = useState(false);
 
   useEffect(() => {
     loadRules();
-    getSettings().then((s) => {
+    getSettings().then(async (s) => {
       setToken(s.githubToken ?? '');
       setSyncToGitHubLists(s.syncToGitHubLists ?? true);
+
+      // Check token scopes to warn about missing 'user' scope for GitHub Lists
+      if (s.githubToken) {
+        const scopeResult = await checkTokenScopes(s.githubToken);
+        setTokenHasUserScope(scopeResult.hasUserScope);
+        setScopeChecked(true);
+        // Sync the cached scope result to settings so sync.ts can use it
+        await updateSettings({ tokenHasUserScope: scopeResult.hasUserScope });
+      } else {
+        setScopeChecked(true);
+      }
     });
     getCategoryStats().then((s) => {
       setCategoryCounts(s.categoryCounts);
@@ -65,6 +79,11 @@ export default function OptionsApp() {
     await updateSettings({ githubToken: token.trim() });
     setTokenSaved(true);
     setTimeout(() => setTokenSaved(false), 2000);
+
+    // Re-check scopes with the new token
+    const scopeResult = await checkTokenScopes(token.trim());
+    setTokenHasUserScope(scopeResult.hasUserScope);
+    await updateSettings({ tokenHasUserScope: scopeResult.hasUserScope });
   }
 
   return (
@@ -94,25 +113,53 @@ export default function OptionsApp() {
 
       {/* v1.1: Classification Overview + v1.2: GitHub Lists Sync */}
       <section className="space-y-3">
+        {/* ⚠️ Scope warning banner */}
+        {scopeChecked && !tokenHasUserScope && (
+          <div className="rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800" role="alert">
+            <div className="flex items-start gap-2">
+              <span className="text-lg">⚠️</span>
+              <div>
+                <p className="font-medium">GitHub Lists Sync: Your token needs the 'user' scope.</p>
+                <p className="mt-1 text-yellow-700">
+                  Update at:{' '}
+                  <a
+                    href="https://github.com/settings/tokens"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2 hover:text-yellow-900"
+                  >
+                    https://github.com/settings/tokens
+                  </a>
+                </p>
+                <p className="mt-1 text-xs text-yellow-600">
+                  The toggle below is disabled until the token includes the <code>user</code> scope.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-700">📂 Auto-Classification (v1.1)</h2>
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className={`flex items-center gap-2 ${!tokenHasUserScope ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
             <span className="text-xs text-gray-500">Sync to GitHub Lists</span>
             <button
               role="switch"
-              aria-checked={syncToGitHubLists}
+              aria-checked={syncToGitHubLists && tokenHasUserScope}
+              disabled={!tokenHasUserScope}
               onClick={async () => {
+                if (!tokenHasUserScope) return;
                 const next = !syncToGitHubLists;
                 setSyncToGitHubLists(next);
                 await updateSettings({ syncToGitHubLists: next });
               }}
               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                syncToGitHubLists ? 'bg-blue-600' : 'bg-gray-300'
-              }`}
+                syncToGitHubLists && tokenHasUserScope ? 'bg-blue-600' : 'bg-gray-300'
+              } ${!tokenHasUserScope ? 'cursor-not-allowed' : ''}`}
+              title={!tokenHasUserScope ? 'Add the user scope to your token to enable this feature' : ''}
             >
               <span
                 className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                  syncToGitHubLists ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                  syncToGitHubLists && tokenHasUserScope ? 'translate-x-[18px]' : 'translate-x-[3px]'
                 }`}
               />
             </button>
@@ -120,7 +167,8 @@ export default function OptionsApp() {
         </div>
         <p className="text-xs text-gray-500">
           Repos are auto-classified into 5 standard categories during every sync.
-          {syncToGitHubLists && ' Classified repos are also added to the corresponding GitHub star list.'}
+          {syncToGitHubLists && tokenHasUserScope && ' Classified repos are also added to the corresponding GitHub star list.'}
+          {!tokenHasUserScope && scopeChecked && ' GitHub Lists sync is unavailable — add the "user" scope to your token above.'}
         </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {CATEGORIES.map((cat) => {
@@ -249,7 +297,7 @@ export default function OptionsApp() {
 
       {/* Footer */}
       <p className="text-xs text-gray-400 text-center pt-4 border-t border-gray-100">
-        GitHub Star Classifier v1.1.0
+        GitHub Star Classifier v1.2.0
       </p>
     </div>
   );
