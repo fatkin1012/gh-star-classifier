@@ -125,6 +125,11 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'vscode', 'vscode-extension', 'chrome-extension',
       'firefox-addon', 'browser-extension', 'extension',
       'terminal', 'terminal-app', 'native-app',
+      'notebook', 'jupyter', 'dashboard', 'platform',
+      'cms', 'blog', 'forum', 'chat', 'social',
+      'e-commerce', 'shop', 'marketplace', 'website',
+      'landing-page', 'portfolio', 'resume', 'cv',
+      'slides', 'presentation',
     ],
     medium: [
       'desktop application', 'native application', 'cross-platform',
@@ -135,11 +140,14 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'chrome extension', 'browser extension',
       'a tool for', 'tool that', 'utility that',
       'a game', 'game engine', 'playable',
+      'a platform for', 'a dashboard for', 'a website for',
     ],
     weak: [
       '-app', '-tool', '-cli', '-desktop',
     ],
-    languages: [],
+    languages: [
+      'jupyter notebook', 'html', 'css',
+    ],
     anti: [
       'library for', 'framework for', 'sdk for',
       'awesome', 'awesome-list', 'template', 'starter',
@@ -158,6 +166,10 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'react-native', 'tailwind-plugin', 'postcss-plugin',
       'rollup-plugin', 'vite-plugin', 'webpack-plugin',
       'eslint-plugin', 'stylelint-plugin',
+      'sdk', 'rest-client', 'graphql-client',
+      'validator', 'parser', 'serializer', 'converter',
+      'transpiler', 'compiler', 'polyfill', 'shim',
+      'typings', 'types', 'definitelytyped', 'declaration',
     ],
     medium: [
       'a react component', 'a vue component',
@@ -171,10 +183,14 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'typescript library', 'javascript library',
       'react hook', 'custom hook',
       'tailwindcss plugin',
+      'a lightweight', 'a minimal', 'a fast',
+      'a simple', 'a modern',
+      'zero-dependency', 'no dependencies', 'written in',
     ],
     weak: [
       'react-', 'vue-', 'ngx-', 'svelte-', 'solid-',
       'use-', '-hooks', '-utils', '-lib', '-sdk',
+      '-core', '-base', '-common', '-shared',
     ],
     languages: [],
     anti: [
@@ -188,6 +204,8 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'starter-template', 'scaffold', 'scaffolding',
       'cookiecutter', 'create-app', 'yeoman', 'generator',
       'project-template', 'repo-template',
+      'example', 'demo', 'sample', 'playground',
+      'sandbox', 'seed', 'seed-project',
     ],
     medium: [
       'template for', 'starter kit', 'starter template',
@@ -196,10 +214,13 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'get started', 'quick start', 'getting started',
       'minimal template', 'opinionated template',
       'my personal template', 'project scaffold',
+      'example project', 'demo app', 'sample code',
+      'reference implementation',
     ],
     weak: [
       '-template', '-starter', '-boilerplate',
       'template-', 'starter-',
+      '-example', '-demo', '-sample',
     ],
     languages: [],
     anti: [
@@ -221,6 +242,8 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'course', 'courses', 'course-notes',
       'guide', 'guides', 'how-to', 'howto',
       'awesome-for', 'list-of', 'lists',
+      'curated', 'handbook', 'playbook',
+      'compilation', 'digest',
     ],
     medium: [
       'a curated list', 'curated list of', 'awesome list of',
@@ -232,6 +255,9 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'tutorial for beginners', 'step by step',
       'a guide to', 'the ultimate guide',
       'how to learn', 'from scratch',
+      'weekly', 'newsletter', 'blog post',
+      'article', 'paper', 'research', 'survey',
+      'overview of',
     ],
     weak: [
       'awesome-', '-resources', '-notes',
@@ -253,6 +279,10 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'oh-my-zsh', 'zsh-plugin', 'bash-it',
       'homebrew', 'homebrew-formula',
       'devcontainer', 'dev-container',
+      'vscode', 'vscode-settings', 'vimrc', 'nvim',
+      'neovim', 'tmux', 'alacritty', 'kitty',
+      'wezterm', 'hyper', 'terminal-emulator',
+      'iterm', 'iterm2',
     ],
     medium: [
       'my dotfiles', 'my config', 'my configuration',
@@ -265,6 +295,9 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'development environment', 'dev environment',
       'setup script', 'install script',
       'oh my zsh', 'zsh config', 'bash config',
+      'my vim config', 'vscode settings',
+      'editor config', 'theme for',
+      'color scheme', 'colorscheme',
     ],
     weak: [
       '-dotfiles', '.dotfiles', '-config',
@@ -273,6 +306,7 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
     languages: [
       'shell', 'batchfile', 'powershell', 'dockerfile',
       'makefile', 'vba', 'visual basic',
+      'vim script', 'viml', 'vim', 'lua',
     ],
     anti: [
       'library for', 'framework for', 'awesome',
@@ -291,6 +325,37 @@ interface ClassificationResult {
 }
 
 /**
+ * Language → category fallback map.
+ * Used as a last resort when rule-based scoring yields score <= 0.
+ * Returns with very low confidence (5) to indicate "guess, not classification".
+ */
+const LANGUAGE_CATEGORY_FALLBACK: Record<string, string> = {
+  'python': 'libraries-frameworks',
+  'javascript': 'libraries-frameworks',
+  'typescript': 'libraries-frameworks',
+  'rust': 'libraries-frameworks',
+  'go': 'libraries-frameworks',
+  'java': 'libraries-frameworks',
+  'kotlin': 'libraries-frameworks',
+  'swift': 'libraries-frameworks',
+  'ruby': 'libraries-frameworks',
+  'c': 'libraries-frameworks',
+  'c++': 'libraries-frameworks',
+  'c#': 'libraries-frameworks',
+  'php': 'libraries-frameworks',
+  'shell': 'scripts-dotfiles',
+  'batchfile': 'scripts-dotfiles',
+  'powershell': 'scripts-dotfiles',
+  'dockerfile': 'scripts-dotfiles',
+  'makefile': 'scripts-dotfiles',
+  'vim script': 'scripts-dotfiles',
+  'viml': 'scripts-dotfiles',
+  'jupyter notebook': 'applications-tools',
+  'html': 'applications-tools',
+  'css': 'applications-tools',
+};
+
+/**
  * 對一個 repo 進行分類
  */
 export function classifyRepo(repo: {
@@ -307,7 +372,6 @@ export function classifyRepo(repo: {
   const topics = (repo.topics || []).map((t) => t.toLowerCase());
 
   const scores: Record<string, number> = {};
-  const subScores: Record<string, Record<string, number>> = {};
 
   for (const [catKey, rule] of Object.entries(CLASSIFY_RULES)) {
     let score = 0;
@@ -372,8 +436,16 @@ export function classifyRepo(repo: {
     }
   }
 
-  // 如果最高分 <= 0，算未分類
+  // 如果最高分 <= 0，試 language fallback
   if (bestScore <= 0) {
+    const fallbackCat = LANGUAGE_CATEGORY_FALLBACK[lang];
+    if (fallbackCat) {
+      return {
+        category: fallbackCat,
+        subCategory: '',
+        confidence: 5, // very low confidence — this is a guess
+      };
+    }
     return { category: 'uncategorized', subCategory: '', confidence: 0 };
   }
 
@@ -509,4 +581,82 @@ export function batchClassify(
     results.set(repo.fullName, classifyRepo(repo));
   }
   return results;
+}
+
+// ─────── Dynamic category icon helpers ───────
+
+/**
+ * Rough topic → icon mapping for auto-generated dynamic categories.
+ */
+const TOPIC_ICON_MAP: Record<string, string> = {
+  'ai': '🤖',
+  'machine-learning': '🤖',
+  'deep-learning': '🧠',
+  'llm': '🧠',
+  'gpt': '🧠',
+  'data': '📊',
+  'database': '🗄️',
+  'big-data': '📊',
+  'security': '🔒',
+  'privacy': '🔒',
+  'crypto': '🔐',
+  'blockchain': '🔗',
+  'cloud': '☁️',
+  'devops': '☁️',
+  'infrastructure': '☁️',
+  'network': '🌐',
+  'web': '🌐',
+  'http': '🌐',
+  'api': '🔌',
+  'mobile': '📱',
+  'ios': '📱',
+  'android': '📱',
+  'flutter': '📱',
+  'react-native': '📱',
+  'design': '🎨',
+  'ui': '🎨',
+  'ux': '🎨',
+  'figma': '🎨',
+  'css': '🎨',
+  'audio': '🎵',
+  'music': '🎵',
+  'video': '🎬',
+  'media': '🎬',
+  'image': '🖼️',
+  '3d': '🧊',
+  'gaming': '🎮',
+  'game': '🎮',
+  'math': '🔢',
+  'science': '🔬',
+  'physics': '⚛️',
+  'bio': '🧬',
+  'finance': '💰',
+  'testing': '🧪',
+  'test': '🧪',
+  'documentation': '📖',
+  'docs': '📖',
+  'hardware': '🖥️',
+  'embedded': '🖥️',
+  'iot': '📡',
+  'robot': '🤖',
+  'cli': '💻',
+  'terminal': '💻',
+  'productivity': '✅',
+  'workflow': '⚡',
+};
+
+/**
+ * Get a rough emoji icon for a set of topics.
+ * Checks signature topics first, falls back to first topic.
+ */
+export function getIconForTopics(topics: string[]): string {
+  for (const topic of topics) {
+    const lower = topic.toLowerCase();
+    if (TOPIC_ICON_MAP[lower]) return TOPIC_ICON_MAP[lower];
+    // Check partial matches for compound topics
+    for (const [key, icon] of Object.entries(TOPIC_ICON_MAP)) {
+      if (lower.includes(key) || key.includes(lower)) return icon;
+    }
+  }
+  return '📁'; // default
 }

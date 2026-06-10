@@ -30,6 +30,7 @@ export interface TaggedRepo extends StarredRepo {
   tags: string[];
   category: string;       // v1.1: 主分類 key (e.g. "applications-tools")
   subCategory: string;    // v1.1: 子分類 key (e.g. "cli-tool")
+  dynamicCategory: string; // v1.3: dynamic category key (empty if uses main category)
   lastSyncedAt: number; // epoch ms
 }
 
@@ -109,3 +110,27 @@ export const DEFAULT_SETTINGS: AppSettings = {
   syncToGitHubLists: true,
   tokenHasUserScope: true,
 };
+
+// ─── v1.3: Dynamic Category types ──────────────────────────────
+
+/**
+ * A dynamically-created category for repos that don't fit the 5 main categories.
+ * Created automatically when >=3 uncategorized repos share common topics/language.
+ */
+export interface DynamicCategory {
+  key: string;
+  label: string;
+  icon: string;
+  /** Common topics that define this category */
+  signatureTopics: string[];
+  /** Common languages in this category */
+  signatureLanguages: string[];
+  createdAt: number;
+}
+
+/**
+ * DB record for a dynamic category (stored in dynamicCategories Dexie table).
+ */
+export interface DynamicCategoryRecord extends DynamicCategory {
+  // Dexie primary key is 'key'
+}

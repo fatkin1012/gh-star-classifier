@@ -3,7 +3,7 @@
 // ============================================================
 
 import Dexie, { type Table } from 'dexie';
-import type { TaggedRepo, AutoTagRule, AppSettings, AiSuggestion } from './types';
+import type { TaggedRepo, AutoTagRule, AppSettings, AiSuggestion, DynamicCategoryRecord, DynamicCategory } from './types';
 import { DEFAULT_SETTINGS } from './types';
 import { classifyRepo } from './classify';
 
@@ -71,7 +71,19 @@ export class StarDB extends Dexie {
       aiCache: 'repoId',
       categoryListMap: 'categoryKey',
     });
+
+    // v5: add dynamicCategories table + dynamicCategory field on repos
+    this.version(5).stores({
+      repos: 'id, name, fullName, language, *tags, starredAt, category, subCategory, dynamicCategory',
+      rules: '++id, name, matchType',
+      settings: 'key',
+      aiCache: 'repoId',
+      categoryListMap: 'categoryKey',
+      dynamicCategories: 'key, label, createdAt',
+    });
   }
+
+  dynamicCategories!: Table<DynamicCategoryRecord, string>;
 }
 
 let _dbInstance: StarDB | null = null;
@@ -261,4 +273,96 @@ export async function setCachedListId(categoryKey: string, listId: string, listN
 export async function clearCategoryListCache(): Promise<void> {
   const d = getDb();
   await d.categoryListMap.clear();
+}
+
+// ─── Dynamic Categories (v1.3) ────────────────────────────
+
+/**
+ * Get all dynamic categories.
+ */
+export async function getDynamicCategories(): Promise<DynamicCategoryRecord[]> {
+  const d = getDb();
+  return d.dynamicCategories.toArray();
+}
+
+/**
+ * Get a single dynamic category by key.
+ */
+export async function getDynamicCategory(key: string): Promise<DynamicCategoryRecord | undefined> {
+  const d = getDb();
+  return d.dynamicCategories.get(key);
+}
+
+/**
+ * Save a dynamic category (create or update).
+ */
+export async function putDynamicCategory(cat: DynamicCategory): Promise<void> {
+  const d = getDb();
+  await d.dynamicCategories.put(cat as DynamicCategoryRecord, cat.key);
+}
+
+/**
+ * Delete a dynamic category and unassign all repos in that category.
+ */
+export async function deleteDynamicCategory(key: string): Promise<number> {
+  const d = getDb();
+  // Unassign repos
+  const repos = await d.repos.where('dynamicCategory').equals(key).toArray();
+  for (const repo of repos) {
+    await d.repos.update(repo.id, { dynamicCategory: '' });
+  }
+  // Delete the category
+  await d.dynamicCategories.delete(key);
+  return repos.length;
+}
+
+/**
+ * Rename a dynamic category (update label only).
+ */
+export async function renameDynamicCategory(key: string, newLabel: string): Promise<void> {
+  const d = getDb();
+  const cat = await d.dynamicCategories.get(key);
+  if (cat) {
+    await d.dynamicCategories.put({ ...cat, label: newLabel }, key);
+  }
+}
+
+/**
+ * Get all uncategorized repos (rule-based + language fallback both failed).
+ * These are repos with category='uncategorized' or without a meaningful dynamicCategory.
+ */
+export async function getUncategorizedRepos(): Promise<TaggedRepo[]> {
+  const d = getDb();
+  return d.repos
+    .filter((r) => r.category === 'uncategorized' || r.category === '')
+    .toArray();
+}
+
+/**
+ * Count repos per dynamic category.
+ */
+export async function getDynamicCategoryStats(): Promise<Array<{
+  key: string;
+  label: string;
+  icon: string;
+  count: number;
+}>> {
+  const d = getDb();
+  const cats = await d.dynamicCategories.toArray();
+  const stats: Array<{ key: string; label: string; icon: string; count: number }> = [];
+
+  for (const cat of cats) {
+    const count = await d.repos
+      .where('dynamicCategory')
+      .equals(cat.key)
+      .count();
+    stats.push({
+      key: cat.key,
+      label: cat.label,
+      icon: cat.icon,
+      count,
+    });
+  }
+
+  return stats.sort((a, b) => b.count - a.count);
 }

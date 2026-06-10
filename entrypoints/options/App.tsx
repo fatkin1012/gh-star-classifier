@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { HiPlus, HiTrash } from 'react-icons/hi2';
-import { db, getSettings, updateSettings, getCategoryStats } from '../../utils/db';
+import { HiPlus, HiTrash, HiPencil, HiXMark } from 'react-icons/hi2';
+import { db, getSettings, updateSettings, getCategoryStats, getDynamicCategories, getDynamicCategoryStats, deleteDynamicCategory, renameDynamicCategory } from '../../utils/db';
 import { checkTokenScopes } from '../../utils/github';
 import { CATEGORIES } from '../../utils/classify';
 import type { AutoTagRule } from '../../utils/types';
@@ -21,6 +21,9 @@ export default function OptionsApp() {
   const [syncToGitHubLists, setSyncToGitHubLists] = useState(true);
   const [tokenHasUserScope, setTokenHasUserScope] = useState(true);
   const [scopeChecked, setScopeChecked] = useState(false);
+  const [dynamicCats, setDynamicCats] = useState<Array<{ key: string; label: string; icon: string; count: number }>>([]);
+  const [renamingKey, setRenamingKey] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   useEffect(() => {
     loadRules();
@@ -43,6 +46,7 @@ export default function OptionsApp() {
       setCategoryCounts(s.categoryCounts);
       setUncategorizedCount(s.uncategorized);
     });
+    getDynamicCategoryStats().then(setDynamicCats);
   }, []);
 
   async function loadRules() {
@@ -199,6 +203,91 @@ export default function OptionsApp() {
           </div>
         </section>
 
+      {/* v1.3: Dynamic Categories */}
+      {dynamicCats.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-gray-700">📂 Dynamic Categories (v1.3)</h2>
+          <p className="text-xs text-gray-500">
+            Auto-generated categories for repos that don't fit the 5 standard categories.
+            Created when multiple uncategorized repos share common topics or languages.
+          </p>
+          <div className="space-y-2">
+            {dynamicCats.map((dc) => (
+              <div key={dc.key} className="flex items-center gap-3 px-4 py-3 bg-indigo-50 rounded-lg border border-indigo-200">
+                <span className="text-lg">{dc.icon}</span>
+                <div className="flex-1 min-w-0">
+                  {renamingKey === dc.key ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        autoFocus
+                      />
+                      <button
+                        onClick={async () => {
+                          if (renameValue.trim()) {
+                            await renameDynamicCategory(dc.key, renameValue.trim());
+                            const stats = await getDynamicCategoryStats();
+                            setDynamicCats(stats);
+                          }
+                          setRenamingKey(null);
+                        }}
+                        className="px-2 py-1 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setRenamingKey(null)}
+                        className="p-1 text-gray-400 hover:text-gray-600"
+                      >
+                        <HiXMark className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm text-gray-800">{dc.label}</span>
+                      <button
+                        onClick={() => {
+                          setRenamingKey(dc.key);
+                          setRenameValue(dc.label);
+                        }}
+                        className="p-1 text-gray-400 hover:text-indigo-600 rounded transition-colors"
+                        title="Rename"
+                      >
+                        <HiPencil className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    <code className="text-[10px] bg-indigo-100 px-1 rounded">{dc.key}</code>
+                    {' · '}{dc.count} repos
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (confirm(`Delete "${dc.label}" and unassign its ${dc.count} repos?`)) {
+                      await deleteDynamicCategory(dc.key);
+                      const stats = await getDynamicCategoryStats();
+                      setDynamicCats(stats);
+                      // Refresh main category stats too
+                      const cs = await getCategoryStats();
+                      setCategoryCounts(cs.categoryCounts);
+                      setUncategorizedCount(cs.uncategorized);
+                    }
+                  }}
+                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                  title="Delete category"
+                >
+                  <HiTrash className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Auto-classify Rules */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-gray-700">Auto-Classify Rules</h2>
@@ -297,7 +386,7 @@ export default function OptionsApp() {
 
       {/* Footer */}
       <p className="text-xs text-gray-400 text-center pt-4 border-t border-gray-100">
-        GitHub Star Classifier v1.2.0
+        GitHub Star Classifier v1.3.0
       </p>
     </div>
   );

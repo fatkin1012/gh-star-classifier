@@ -2,7 +2,7 @@
 // Background sync — detect new stars and auto-classify
 // ============================================================
 
-import { db, getSettings, updateSettings, applyAutoRules, setAiCache } from './db';
+import { db, getSettings, updateSettings, applyAutoRules, setAiCache, getUncategorizedRepos, getDynamicCategories, putDynamicCategory } from './db';
 import { fetchAllStars, checkTokenScopes } from './github';
 import { analyzeRepo, fetchReadmeSummary } from './llm';
 import { classifyRepo } from './classify';
@@ -11,6 +11,7 @@ import {
   addRepoToList,
   resetEmptyDataLog,
 } from './starlists';
+import { syncDynamicCategories } from './dynamicCategory';
 import type { TaggedRepo } from './types';
 
 /**
@@ -77,7 +78,7 @@ export async function fullSync(token: string): Promise<{
 
     // Apply auto-classify rules (custom tags) if enabled
     if (settings.autoClassifyEnabled) {
-      const autoTags = await applyAutoRules({ ...raw, tags: [], category: '', subCategory: '', lastSyncedAt: 0 });
+      const autoTags = await applyAutoRules({ ...raw, tags: [], category: '', subCategory: '', dynamicCategory: '', lastSyncedAt: 0 });
       if (autoTags.length > 0) {
         const tagSet = new Set([...tags, ...autoTags]);
         tags = [...tagSet];
@@ -91,7 +92,7 @@ export async function fullSync(token: string): Promise<{
       tags = [...tagSet];
     }
 
-    await db.repos.put({ ...raw, tags, category, subCategory, lastSyncedAt: Date.now() }, raw.id);
+    await db.repos.put({ ...raw, tags, category, subCategory, dynamicCategory: '', lastSyncedAt: Date.now() }, raw.id);
 
     // ─── Sync to GitHub star lists (v1.2) ─────────────────────
     if (settings.syncToGitHubLists && tokenHasUserScope && category && category !== 'uncategorized' && raw.nodeId) {
@@ -124,7 +125,7 @@ export async function fullSync(token: string): Promise<{
         language: raw.language || '',
         topics: raw.topics,
       });
-      const tagged: TaggedRepo = { ...raw, tags: [], category: llmCatResult.category || '', subCategory: llmCatResult.subCategory || '', lastSyncedAt: 0 };
+      const tagged: TaggedRepo = { ...raw, tags: [], category: llmCatResult.category || '', subCategory: llmCatResult.subCategory || '', dynamicCategory: '', lastSyncedAt: 0 };
       try {
         const readmeSummary = await fetchReadmeSummary(tagged);
         const suggestion = await analyzeRepo(tagged, readmeSummary, settings.llm);
@@ -140,6 +141,35 @@ export async function fullSync(token: string): Promise<{
         console.error(`[LLM sync] Failed for ${raw.fullName}:`, err);
       }
     }
+  }
+
+  // ─── v1.3: Dynamic categories for remaining uncategorized repos ───────
+  try {
+    const uncategorized = await getUncategorizedRepos();
+    if (uncategorized.length >= 3) {
+      const dcResult = await syncDynamicCategories(
+        uncategorized,
+        () => getDynamicCategories(),
+        async (cat) => { await putDynamicCategory(cat); },
+        async (assignments) => {
+          for (const [fullName, dcKey] of assignments) {
+            const repo = await db.repos
+              .filter((r) => r.fullName === fullName)
+              .first();
+            if (repo) {
+              await db.repos.update(repo.id, { dynamicCategory: dcKey });
+            }
+          }
+        }
+      );
+      if (dcResult.categoriesCreated > 0) {
+        console.info(
+          `[Sync] Created ${dcResult.categoriesCreated} dynamic categories, assigned ${dcResult.reposAssigned} repos`
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('[Sync] Dynamic category analysis failed:', err instanceof Error ? err.message : err);
   }
 
   return {
