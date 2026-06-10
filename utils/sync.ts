@@ -60,7 +60,7 @@ export async function fullSync(token: string): Promise<{
   const listIdCache = new Map<string, string>();
 
   // ─── Determine if LLM should be used for new repos ──────────
-  const useLLM = settings.llm.autoClassifyNew && settings.llm.apiKey && settings.llm.autoClassifyNew;
+  const useLLM = settings.llm.apiKey && settings.llm.autoClassifyNew;
 
   for (const raw of rawRepos) {
     const existing = await db.repos.get(raw.id);

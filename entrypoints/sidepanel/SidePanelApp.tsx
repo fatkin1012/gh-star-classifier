@@ -7,7 +7,7 @@ import {
 import { db, getSettings, updateSettings, getAiCache, setAiCache, getCategoryStats } from '../../utils/db';
 import { getAllTags, addTagsToRepo, removeTagsFromRepo, bulkTagRepos } from '../../utils/tags';
 import { fullSync, syncToGitHubStarLists } from '../../utils/sync';
-import { analyzeRepo, fetchReadmeSummary, validateLlmConfig, getProviderDefaults } from '../../utils/llm';
+import { classifyRepoWithLLM, fetchReadmeSummary, validateLlmConfig, getProviderDefaults } from '../../utils/llm';
 import { getCategoryInfo, getSubCategoryLabel, CATEGORIES } from '../../utils/classify';
 import type { TaggedRepo, LlmProvider } from '../../utils/types';
 import TagBadge from '../../components/TagBadge';
@@ -129,11 +129,13 @@ export default function SidePanelApp() {
   const [syncListsStatus, setSyncListsStatus] = useState<string | null>(null);
 
   const handleSyncToLists = async () => {
+    if (isSyncing) return;
     const s = await getSettings();
     if (!s.githubToken) {
       setSyncListsStatus('GitHub token not configured');
       return;
     }
+    setIsSyncing(true);
     setSyncingLists(true);
     setSyncListsStatus('Syncing to GitHub star lists...');
     try {
@@ -143,20 +145,25 @@ export default function SidePanelApp() {
       setSyncListsStatus(`✗ ${err instanceof Error ? err.message : 'Sync failed'}`);
     } finally {
       setSyncingLists(false);
+      setIsSyncing(false);
       setTimeout(() => setSyncListsStatus(null), 5000);
     }
   };
 
-  // ─── Sync ────────────────────────────────────────────
+  // ─── Sync (with concurrency guard) ────────────────────
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const handleSync = async () => {
+    if (isSyncing) return;
     const s = await getSettings();
     if (!s.githubToken) return;
+    setIsSyncing(true);
     setLoading(true);
     try {
       await fullSync(s.githubToken);
       await loadData();
     } finally {
+      setIsSyncing(false);
       setLoading(false);
     }
   };
@@ -186,8 +193,11 @@ export default function SidePanelApp() {
           });
           continue;
         }
+        // Note: Using classifyRepoWithLLM for quick tag suggestions on untagged repos.
+        // This is intentional — classification (category+subCategory) already happens
+        // during sync; here we only suggest missing tags.
         const readmeSummary = await fetchReadmeSummary(repo);
-        const suggestion = await analyzeRepo(repo, readmeSummary, s.llm);
+        const suggestion = await classifyRepoWithLLM(repo, readmeSummary, s.llm);
         await setAiCache(repo.id, { ...suggestion, analyzedAt: Date.now() });
         if (suggestion.tags.length > 0) {
           setAiSuggestions((prev) => {
@@ -247,13 +257,14 @@ export default function SidePanelApp() {
   };
 
   const handleSaveSettings = async () => {
+    const existingSettings = await getSettings();
     await updateSettings({
       githubToken: githubToken || null,
       autoClassifyEnabled: autoClassify,
       syncIntervalMinutes: syncInterval,
       llm: {
         provider: llmProvider, apiKey: llmApiKey, model: llmModel,
-        baseUrl: llmBaseUrl, customPrompt: '', batchSize: llmBatchSize, autoClassifyNew: llmAutoNew,
+        baseUrl: llmBaseUrl, customPrompt: existingSettings.llm.customPrompt, batchSize: llmBatchSize, autoClassifyNew: llmAutoNew,
       },
     });
     await browser.alarms.create('sync-stars', { periodInMinutes: syncInterval });
