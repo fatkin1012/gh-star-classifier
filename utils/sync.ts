@@ -126,22 +126,6 @@ export async function fullSync(token: string): Promise<{
       const autoTags = await applyAutoRules({
         ...raw, tags, category, subCategory, dynamicCategory: '', lastSyncedAt: 0,
       });
-    // v1.2: Auto-classify into 5 standard categories with confidence
-    const catResult = classifyRepo({
-      name: raw.name,
-      fullName: raw.fullName,
-      description: raw.description || '',
-      language: raw.language || '',
-      topics: raw.topics,
-    });
-    const category = catResult.category;
-    const subCategory = catResult.subCategory;
-    const classificationConfidence = catResult.confidence;
-
-    // Apply auto-classify rules (custom tags) if enabled
-    if (settings.autoClassifyEnabled) {
-      const autoTags = await applyAutoRules({ ...raw, tags: [], category: category, subCategory: subCategory, classificationConfidence, lastSyncedAt: 0 });
-
       if (autoTags.length > 0) {
         const tagSet = new Set([...tags, ...autoTags]);
         tags = [...tagSet];
@@ -161,22 +145,6 @@ export async function fullSync(token: string): Promise<{
 
     // ─── Sync to GitHub star lists (v1.2) ─────────────────────
     if (settings.syncToGitHubLists && tokenHasUserScope && category && category !== 'uncategorized' && raw.nodeId) {
-    await db.repos.put({ ...raw, tags, category, subCategory, classificationConfidence, lastSyncedAt: Date.now() }, raw.id);
-  }
-
-  // ─── LLM auto-classify for new repos ───────────────────
-  if (settings.llm.autoClassifyNew && settings.llm.apiKey && newCount > 0) {
-    for (const raw of rawRepos) {
-      // Reclassify the raw repo for the LLM analysis context
-      const llmCatResult = classifyRepo({
-        name: raw.name,
-        fullName: raw.fullName,
-        description: raw.description || '',
-        language: raw.language || '',
-        topics: raw.topics,
-      });
-      const tagged: TaggedRepo = { ...raw, tags: [], category: llmCatResult.category || '', subCategory: llmCatResult.subCategory || '', classificationConfidence: llmCatResult.confidence, lastSyncedAt: 0 };
-
       try {
         if (!listIdCache.has(category)) {
           const listId = await ensureCategoryList(token, category);

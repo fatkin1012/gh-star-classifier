@@ -116,7 +116,6 @@ interface ClassifyWeights {
   anti: string[];      // 反匹配 → -3 (避免誤分)
 }
 
-// v1.2: Expanded keyword lists for better classification accuracy
 const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
   'applications-tools': {
     strong: [
@@ -131,15 +130,6 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'e-commerce', 'shop', 'marketplace', 'website',
       'landing-page', 'portfolio', 'resume', 'cv',
       'slides', 'presentation',
-      'notebook', 'jupyter', 'jupyter-notebook',
-      'ide', 'editor', 'code-editor',
-      'applet', 'webview', 'tauri',
-      'electron-app', 'tauri-app',
-      'macos-app', 'ios-app', 'android-app',
-      'windows-app', 'cross-platform-app',
-      'discord-bot', 'telegram-bot', 'slack-bot',
-      'bot', 'chatbot',
-
     ],
     medium: [
       'desktop application', 'native application', 'cross-platform',
@@ -151,21 +141,9 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'a tool for', 'tool that', 'utility that',
       'a game', 'game engine', 'playable',
       'a platform for', 'a dashboard for', 'a website for',
-      'a simple tool', 'a small utility',
-      'a mac app', 'a windows app', 'a mobile app',
-      'runs on', 'cross platform',
-      'slack bot', 'discord bot', 'telegram bot',
-      'text editor', 'code editor',
-      'notebook interface',
-      'a convenient', 'an easy-to-use',
-      'tool for managing', 'tool to help',
-      'a modern', 'lightweight editor',
-
     ],
     weak: [
       '-app', '-tool', '-cli', '-desktop',
-      '-bot', '-editor', '-viewer',
-      '-player', '-browser', '-manager',
     ],
     languages: [
       'jupyter notebook', 'html', 'css',
@@ -174,8 +152,6 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'library for', 'framework for', 'sdk for',
       'awesome', 'awesome-list', 'template', 'starter',
       'boilerplate', 'dotfiles', 'my config',
-      'component library', 'ui components',
-      'a collection of', 'collection of',
     ],
   },
   'libraries-frameworks': {
@@ -194,17 +170,6 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'validator', 'parser', 'serializer', 'converter',
       'transpiler', 'compiler', 'polyfill', 'shim',
       'typings', 'types', 'definitelytyped', 'declaration',
-      'agent-sdk', 'agent-framework', 'agent-library',
-      'llm-sdk', 'llm-framework', 'ai-sdk',
-      'state-management', 'state-manager',
-      'router', 'routing', 'http-client',
-      'orm', 'odm', 'database-driver',
-      'validation', 'validator', 'serializer',
-      'testing', 'test-utils', 'test-framework',
-      'auth', 'authentication', 'oauth',
-      'type-safe', 'type-safe',
-      'data-fetching', 'state-manager',
-
     ],
     medium: [
       'a react component', 'a vue component',
@@ -221,36 +186,16 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'a lightweight', 'a minimal', 'a fast',
       'a simple', 'a modern',
       'zero-dependency', 'no dependencies', 'written in',
-      'a pure python library', 'a go library',
-      'a rust library', 'a java library',
-      'package for', 'module for',
-      'provides a', 'simple wrapper',
-      'client library', 'api client',
-      'state management', 'state container',
-      'type definitions', 'typings for',
-      'a small library', 'a lightweight library',
-      'a zero-dependency', 'tiny library',
-      'drop-in replacement',
-
     ],
     weak: [
       'react-', 'vue-', 'ngx-', 'svelte-', 'solid-',
       'use-', '-hooks', '-utils', '-lib', '-sdk',
       '-core', '-base', '-common', '-shared',
-      '-client', '-provider', '-adapter',
-      '-orm', '-driver', '-middleware',
     ],
-    languages: [
-      'python', 'javascript', 'typescript', 'rust',
-      'go', 'java', 'kotlin', 'swift', 'ruby', 'php',
-      'c#', 'csharp', 'f#', 'fsharp', 'scala', 'elixir',
-      'haskell', 'clojure', 'dart', 'zig', 'nim',
-
-    ],
+    languages: [],
     anti: [
       'awesome', 'template', 'starter', 'boilerplate',
       'game', 'desktop app', 'cli tool',
-      'tutorial', 'guide', 'my notes',
     ],
   },
   'boilerplates-starters': {
@@ -261,8 +206,6 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'project-template', 'repo-template',
       'example', 'demo', 'sample', 'playground',
       'sandbox', 'seed', 'seed-project',
-      'create-', 'degit', 'template-repo',
-
     ],
     medium: [
       'template for', 'starter kit', 'starter template',
@@ -273,23 +216,16 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'my personal template', 'project scaffold',
       'example project', 'demo app', 'sample code',
       'reference implementation',
-      'starting point for', 'kickstart',
-      'monorepo template', 'typescript starter',
-      'next.js starter', 'react starter',
-
     ],
     weak: [
       '-template', '-starter', '-boilerplate',
       'template-', 'starter-',
       '-example', '-demo', '-sample',
-      'create-', 'create',
-
     ],
     languages: [],
     anti: [
       'awesome', 'library', 'framework', 'sdk',
       'game', 'component library',
-      'dotfiles', 'configuration',
     ],
   },
   'awesome-lists-tutorials': {
@@ -308,12 +244,6 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'awesome-for', 'list-of', 'lists',
       'curated', 'handbook', 'playbook',
       'compilation', 'digest',
-      'paper', 'papers', 'research',
-      'blog', 'blog-post', 'article',
-      'examples', 'example-code', 'samples',
-      'workshop', 'workshops', 'hands-on',
-      'curriculum', 'syllabus',
-
     ],
     medium: [
       'a curated list', 'curated list of', 'awesome list of',
@@ -328,22 +258,15 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'weekly', 'newsletter', 'blog post',
       'article', 'paper', 'research', 'survey',
       'overview of',
-      'list of resources', 'curated resources',
-      'examples of', 'code examples for',
-      'practical guide', 'comprehensive guide',
-      'collection of awesome',
-
     ],
     weak: [
       'awesome-', '-resources', '-notes',
       '-roadmap', '-cheatsheet',
-      '-guide', '-tutorial', '-examples',
     ],
     languages: [],
     anti: [
       'library for', 'framework for', 'sdk for',
       'template for', 'boilerplate', 'electron app',
-      'component library', 'ui kit',
     ],
   },
   'scripts-dotfiles': {
@@ -360,14 +283,6 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'neovim', 'tmux', 'alacritty', 'kitty',
       'wezterm', 'hyper', 'terminal-emulator',
       'iterm', 'iterm2',
-      'git-hooks', 'husky', 'commitlint',
-      'pre-commit', 'lint-staged',
-      'nix', 'nixos', 'nix-darwin',
-      'ansible', 'ansible-role',
-      'terraform', 'pulumi', 'iac',
-      'k8s', 'kubernetes', 'helm',
-      'cloudformation', 'cdk',
-
     ],
     medium: [
       'my dotfiles', 'my config', 'my configuration',
@@ -383,22 +298,15 @@ const CLASSIFY_RULES: Record<string, ClassifyWeights> = {
       'my vim config', 'vscode settings',
       'editor config', 'theme for',
       'color scheme', 'colorscheme',
-      'git hooks', 'pre-commit hooks',
-      'infrastructure as code',
-      'deployment script', 'provisioning',
-
     ],
     weak: [
       '-dotfiles', '.dotfiles', '-config',
       '-workflow', '-script', '-macro',
-      '-hook', '-hooks',
     ],
     languages: [
       'shell', 'batchfile', 'powershell', 'dockerfile',
       'makefile', 'vba', 'visual basic',
       'vim script', 'viml', 'vim', 'lua',
-      'hcl', 'terraform', 'nix',
-
     ],
     anti: [
       'library for', 'framework for', 'awesome',
@@ -419,9 +327,6 @@ export interface ClassificationResult {
 /**
  * Optional AI classifier callback for classifyRepo.
  * Should return category + subCategory + tags, or null to fallback to rule-based.
- * 對一個 repo 進行分類
- * v1.2: Improved scoring with better scale and confidence calculation
-
  */
 export type AiClassifier = (repo: {
   name: string;
@@ -483,19 +388,19 @@ export function classifyRepoSync(repo: {
 
   for (const [catKey, rule] of Object.entries(CLASSIFY_RULES)) {
     let score = 0;
-    let matchCount = 0;
 
     // topics 強匹配 → +3 each (exact match)
-    // weak partial match → +1 each (substring overlap)
+    // weak partial match → +1 each (substring overlap, but not exact)
     for (const topic of topics) {
       if (rule.strong.includes(topic)) {
         score += 3;
-        matchCount++;
       } else {
+        // Only try partial match when exact match didn't hit.
+        // This avoids double-counting (e.g. topic "cli" matching
+        // both exact and partial on the same keyword).
         for (const kw of rule.strong) {
           if (topic.includes(kw) || kw.includes(topic)) {
             score += 1;
-            matchCount++;
             break;
           }
         }
@@ -506,7 +411,6 @@ export function classifyRepoSync(repo: {
     for (const kw of rule.medium) {
       if (desc.includes(kw)) {
         score += 2;
-        matchCount++;
       }
     }
 
@@ -514,15 +418,13 @@ export function classifyRepoSync(repo: {
     for (const kw of rule.weak) {
       if (name.includes(kw) || fullName.includes(kw)) {
         score += 1;
-        matchCount++;
       }
     }
 
-    // 語言匹配 → +2 (only if the language is indicative of a library)
+    // 語言匹配 → +2
     if (rule.languages.length > 0 && lang) {
       if (rule.languages.includes(lang)) {
         score += 2;
-        matchCount++;
       }
     }
 
@@ -539,15 +441,11 @@ export function classifyRepoSync(repo: {
   // 找最高分
   let bestCat = 'uncategorized';
   let bestScore = -999;
-  let secondBestScore = -999;
 
   for (const [catKey, score] of Object.entries(scores)) {
     if (score > bestScore) {
-      secondBestScore = bestScore;
       bestScore = score;
       bestCat = catKey;
-    } else if (score > secondBestScore) {
-      secondBestScore = score;
     }
   }
 
@@ -564,18 +462,9 @@ export function classifyRepoSync(repo: {
     return { category: 'uncategorized', subCategory: '', confidence: 0 };
   }
 
-  // Calculate confidence based on score magnitude and margin over second-best
-  // Max theoretical score varies; use a sigmoid-like scale
-  const margin = bestScore - secondBestScore;
-  const rawConfidence = Math.min(100, Math.round((bestScore / 20) * 100));
-
-  // Boost confidence when there's a clear margin over second place
-  let confidence = rawConfidence;
-  if (margin >= 5) confidence = Math.min(100, rawConfidence + 15);
-  if (margin >= 10) confidence = Math.min(100, rawConfidence + 25);
-
   // 找最匹配的子分類
   const subCat = findBestSubCategory(bestCat, { name, desc, topics, lang });
+  const confidence = Math.min(100, Math.round((bestScore / 15) * 100));
 
   return {
     category: bestCat,
@@ -628,7 +517,6 @@ export async function classifyRepo(
 
 /**
  * 在子分類中找到最匹配的
- * v1.2: Expanded sub-keywords
  */
 function findBestSubCategory(
   category: string,
@@ -641,39 +529,39 @@ function findBestSubCategory(
 
   // 對每個子分類定義一些關鍵詞
   const subKeywords: Record<string, string[]> = {
-    'cli-tool': ['cli', 'command', 'terminal', 'command-line', 'commandline', 'tui'],
-    'desktop-app': ['desktop', 'electron', 'tauri', 'native', 'winforms', 'wpf', 'qt', 'macos', 'windows-app'],
-    'web-app': ['webapp', 'web-app', 'web app', 'pwa', 'full-stack', 'fullstack', 'dashboard', 'spa', 'web-application'],
-    'game': ['game', 'gaming', 'game-engine', 'playable', 'godot', 'unity', 'unreal', 'phaser', 'pixel'],
-    'dev-tool': ['dev-tool', 'developer tool', 'debugger', 'profiler', 'linter', 'formatter', 'bundler', 'compiler', 'build-tool'],
-    'browser-ext': ['extension', 'chrome extension', 'browser extension', 'firefox addon', 'webextension'],
+    'cli-tool': ['cli', 'command', 'terminal', 'command-line', 'commandline'],
+    'desktop-app': ['desktop', 'electron', 'tauri', 'native', 'winforms', 'wpf', 'qt'],
+    'web-app': ['webapp', 'web-app', 'web app', 'pwa', 'full-stack', 'fullstack', 'dashboard', 'spa'],
+    'game': ['game', 'gaming', 'game-engine', 'playable', 'godot', 'unity', 'unreal', 'phaser'],
+    'dev-tool': ['dev-tool', 'developer tool', 'debugger', 'profiler', 'linter', 'formatter', 'bundler', 'compiler'],
+    'browser-ext': ['extension', 'chrome extension', 'browser extension', 'firefox addon'],
 
-    'npm-package': ['npm', 'npm package', 'npm-package', 'npm-pkg'],
-    'react-component': ['react', 'react-component', 'react component', 'jsx', 'tsx', 'react-hook'],
-    'ui-library': ['ui', 'component library', 'design system', 'ui-kit', 'ui kit', 'components'],
-    'utility': ['utility', 'util', 'helper', 'tiny', 'micro', 'mini', 'lightweight'],
-    'sdk-wrapper': ['sdk', 'api', 'client', 'wrapper', 'sdk-wrapper'],
-    'plugin': ['plugin', 'vite-plugin', 'rollup-plugin', 'webpack-plugin', 'eslint-plugin', 'tailwind-plugin', 'postcss-plugin', 'prettier-plugin'],
-    'framework': ['framework', 'opinionated', 'full-featured', 'meta-framework'],
+    'npm-package': ['npm', 'npm package', 'npm-package'],
+    'react-component': ['react', 'react-component', 'react component', 'jsx', 'tsx'],
+    'ui-library': ['ui', 'component library', 'design system', 'ui-kit', 'ui kit'],
+    'utility': ['utility', 'util', 'helper', 'tiny', 'micro'],
+    'sdk-wrapper': ['sdk', 'api', 'client', 'wrapper'],
+    'plugin': ['plugin', 'vite-plugin', 'rollup-plugin', 'webpack-plugin', 'eslint-plugin', 'tailwind-plugin', 'postcss-plugin'],
+    'framework': ['framework', 'opinionated', 'full-featured'],
 
-    'web-template': ['web', 'next.js', 'react', 'vue', 'svelte', 'frontend', 'web-template'],
-    'backend-template': ['backend', 'server', 'api', 'express', 'fastapi', 'django', 'spring', 'backend-template'],
-    'fullstack-template': ['fullstack', 'full-stack', 'full stack', 'next.js', 'remix'],
-    'config-template': ['config', 'monorepo', 'typescript', '.github', 'gitignore', 'eslint-config', 'tsconfig'],
-    'starter-kit': ['starter-kit', 'starter kit', 'get started', 'kickstart'],
+    'web-template': ['web', 'next.js', 'react', 'vue', 'svelte', 'frontend'],
+    'backend-template': ['backend', 'server', 'api', 'express', 'fastapi', 'django', 'spring'],
+    'fullstack-template': ['fullstack', 'full-stack', 'full stack', 'next.js'],
+    'config-template': ['config', 'monorepo', 'typescript', '.github', 'gitignore'],
+    'starter-kit': ['starter-kit', 'starter kit', 'get started'],
 
-    'awesome-list': ['awesome', 'awesome-list', 'awesome-list'],
-    'interview-qa': ['interview', 'interview-questions', 'coding-interview', 'leetcode', 'interview-prep'],
-    'learning-notes': ['notes', 'learning', 'study', 'learn', 'my-notes', 'study-notes'],
-    'documentation': ['doc', 'docs', 'documentation', 'wiki', 'docsify', 'docusaurus'],
-    'course-tutorial': ['tutorial', 'course', 'guide', 'how-to', 'workshop', 'hands-on'],
+    'awesome-list': ['awesome', 'awesome-list'],
+    'interview-qa': ['interview', 'interview-questions', 'coding-interview', 'leetcode'],
+    'learning-notes': ['notes', 'learning', 'study', 'learn'],
+    'documentation': ['doc', 'docs', 'documentation', 'wiki'],
+    'course-tutorial': ['tutorial', 'course', 'guide', 'how-to'],
 
-    'shell-script': ['shell', 'bash', 'zsh', 'shell script', 'bash-script'],
-    'github-action': ['action', 'workflow', 'ci', 'github action', 'composite-action'],
-    'docker-config': ['docker', 'dockerfile', 'docker-compose', 'container', 'docker-image'],
-    'dotfiles': ['dotfiles', 'dotfile', 'dot-file'],
-    'vba-macro': ['vba', 'macro', 'excel', 'office', 'vba-macro'],
-    'ci-cd': ['ci/cd', 'cicd', 'continuous integration', 'deploy', 'ci-cd'],
+    'shell-script': ['shell', 'bash', 'zsh', 'shell script'],
+    'github-action': ['action', 'workflow', 'ci', 'github action'],
+    'docker-config': ['docker', 'dockerfile', 'docker-compose', 'container'],
+    'dotfiles': ['dotfiles', 'dotfile'],
+    'vba-macro': ['vba', 'macro', 'excel', 'office'],
+    'ci-cd': ['ci/cd', 'cicd', 'continuous integration', 'deploy'],
   };
 
   const scores: Record<string, number> = {};
@@ -700,21 +588,6 @@ function findBestSubCategory(
   }
 
   return bestSub;
-}
-
-/**
- * Confidence color for UI display
- */
-export function getConfidenceColor(confidence: number): string {
-  if (confidence >= 70) return 'text-green-600';
-  if (confidence >= 40) return 'text-yellow-600';
-  return 'text-red-500';
-}
-
-export function getConfidenceLabel(confidence: number): string {
-  if (confidence >= 70) return 'High';
-  if (confidence >= 40) return 'Medium';
-  return 'Low';
 }
 
 /**

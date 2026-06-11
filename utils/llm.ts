@@ -116,7 +116,7 @@ async function callOpenAI(prompt: string, config: LlmConfig): Promise<string> {
         { role: 'user', content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 4000,
+      max_tokens: 300,
     }),
   });
 
@@ -145,7 +145,7 @@ async function callAnthropic(prompt: string, config: LlmConfig): Promise<string>
       ],
       system: 'You are a precise repository classifier. Respond only with valid JSON.',
       temperature: 0.3,
-      max_tokens: 4000,
+      max_tokens: 300,
     }),
   });
 
@@ -172,7 +172,7 @@ async function callOllama(prompt: string, config: LlmConfig): Promise<string> {
         { role: 'user', content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 4000,
+      max_tokens: 300,
     }),
   });
 

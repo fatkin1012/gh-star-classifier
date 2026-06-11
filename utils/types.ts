@@ -31,8 +31,7 @@ export interface TaggedRepo extends StarredRepo {
   category: string;       // v1.1: 主分類 key (e.g. "applications-tools")
   subCategory: string;    // v1.1: 子分類 key (e.g. "cli-tool")
   dynamicCategory: string; // v1.3: dynamic category key (empty if uses main category)
-  classificationConfidence?: number; // v1.2: 0-100 confidence score
-
+  classificationConfidence?: number; // v1.2: 0-100 confidence score for AI classification
   lastSyncedAt: number; // epoch ms
 }
 
@@ -96,47 +95,6 @@ export interface AppSettings {
   tokenHasUserScope: boolean;
 }
 
-// ─── Batch AI Classification Result Types (v1.2) ────────────
-
-/** Result from batch AI classification */
-export interface BatchClassificationResult {
-  /** Each repo's suggested category assignment */
-  assignments: RepoClassificationAssignment[];
-  /** New categories proposed by the AI */
-  proposedCategories: ProposedCategory[];
-  /** Repos that the AI thinks are in the wrong category */
-  reclassifications: ReclassificationSuggestion[];
-}
-
-export interface RepoClassificationAssignment {
-  fullName: string;
-  category: string;       // existing or proposed category key
-  subCategory: string;
-  confidence: number;     // 0-100
-  reasoning: string;
-}
-
-export interface ProposedCategory {
-  key: string;
-  label: string;
-  repos: string[];        // fullNames to include
-  reason: string;
-}
-
-export interface ReclassificationSuggestion {
-  fullName: string;
-  fromCategory: string;
-  toCategory: string;
-  reason: string;
-}
-
-/** Topic cluster identified by the AI */
-export interface TopicCluster {
-  clusterName: string;
-  repos: string[];
-  suggestedCategory: string;
-}
-
 export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   provider: 'openai',
   apiKey: '',
@@ -180,4 +138,43 @@ export interface DynamicCategory {
  */
 export interface DynamicCategoryRecord extends DynamicCategory {
   // Dexie primary key is 'key'
+}
+
+// ─── v1.2: Batch AI Classification Types ────────────────────────
+
+export interface RepoClassificationAssignment {
+  fullName: string;
+  repoId: number;
+  category: string;
+  subCategory: string;
+  confidence: number;
+}
+
+export interface ProposedCategory {
+  key: string;
+  label: string;
+  icon: string;
+  description: string;
+  repos: number[];
+}
+
+export interface ReclassificationSuggestion {
+  fullName: string;
+  repoId: number;
+  fromCategory: string;
+  toCategory: string;
+  reason: string;
+}
+
+export interface BatchClassificationResult {
+  assignments: RepoClassificationAssignment[];
+  proposedCategories: ProposedCategory[];
+  reclassifications: ReclassificationSuggestion[];
+}
+
+export interface TopicCluster {
+  name: string;
+  icon: string;
+  repos: number[];
+  commonTopics: string[];
 }

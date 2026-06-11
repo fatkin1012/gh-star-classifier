@@ -174,6 +174,34 @@ export async function setAiCache(repoId: number, suggestion: AiSuggestion): Prom
   await d.aiCache.put({ repoId, suggestion }, repoId);
 }
 
+export async function updateRepoClassification(repoId: number, category: string, subCategory: string, confidence: number): Promise<void> {
+  await db.repos.update(repoId, { category, subCategory, classificationConfidence: confidence });
+}
+
+export async function getReposNeedingReclassification(): Promise<TaggedRepo[]> {
+  return db.repos
+    .filter(r => !r.category || (r.classificationConfidence ?? 0) < 40)
+    .toArray();
+}
+
+export async function reclassifyRepo(repoId: number): Promise<void> {
+  const repo = await db.repos.get(repoId);
+  if (!repo) return;
+  const { classifyRepoSync } = await import('./classify');
+  const result = classifyRepoSync({
+    name: repo.name,
+    fullName: repo.fullName,
+    description: repo.description ?? "",
+    language: repo.language ?? "",
+    topics: repo.topics,
+  });
+  await db.repos.update(repoId, {
+    category: result.category,
+    subCategory: result.subCategory,
+    classificationConfidence: result.confidence,
+  });
+}
+
 export async function cleanAiCache(): Promise<void> {
   const d = getDb();
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -221,56 +249,6 @@ export async function getUnanalyzedRepos(): Promise<TaggedRepo[]> {
 }
 
 // ─── Auto rules ─────────────────────────────────────────────
-
-// ─── v1.2: Classification confidence & reclassification ───
-
-/**
- * Update a repo's classification (category, subCategory, confidence).
- */
-export async function updateRepoClassification(
-  repoId: number,
-  category: string,
-  subCategory: string,
-  confidence?: number,
-): Promise<void> {
-  const d = getDb();
-  const updateData: Partial<TaggedRepo> = { category, subCategory };
-  if (confidence !== undefined) {
-    updateData.classificationConfidence = Math.min(100, Math.max(0, confidence));
-  }
-  await d.repos.update(repoId, updateData);
-}
-
-/** Get repos that need reclassification (low confidence or uncategorized) */
-export async function getReposNeedingReclassification(): Promise<TaggedRepo[]> {
-  const d = getDb();
-  const all = await d.repos.toArray();
-  return all.filter((r) => {
-    // Uncategorized or low confidence or no classification
-    if (!r.category || r.category === 'uncategorized') return true;
-    const conf = r.classificationConfidence;
-    if (conf === undefined || conf < 40) return true;
-    return false;
-  });
-}
-
-/** Reclassify a single repo using the rule engine, returns updated result */
-export async function reclassifyRepo(repoId: number): Promise<{ category: string; subCategory: string; confidence: number } | null> {
-  const d = getDb();
-  const repo = await d.repos.get(repoId);
-  if (!repo) return null;
-
-  const result = classifyRepo({
-    name: repo.name,
-    fullName: repo.fullName,
-    description: repo.description || '',
-    language: repo.language || '',
-    topics: repo.topics || [],
-  });
-
-  await updateRepoClassification(repoId, result.category, result.subCategory, result.confidence);
-  return result;
-}
 
 export async function applyAutoRules(repo: TaggedRepo): Promise<string[]> {
   const d = getDb();

@@ -5,18 +5,12 @@ import {
   HiFunnel, HiArrowPath, HiCheckCircle, HiTag, HiBars3,
   HiListBullet,
 } from 'react-icons/hi2';
-import { db, getSettings, updateSettings, getAiCache, setAiCache, getCategoryStats, updateRepoClassification } from '../../utils/db';
+import { db, getSettings, updateSettings, getAiCache, setAiCache, getCategoryStats } from '../../utils/db';
 import { getAllTags, addTagsToRepo, removeTagsFromRepo, bulkTagRepos } from '../../utils/tags';
 import { fullSync, syncToGitHubStarLists } from '../../utils/sync';
 import { classifyRepoWithLLM, fetchReadmeSummary, validateLlmConfig, getProviderDefaults } from '../../utils/llm';
 import { getCategoryInfo, getSubCategoryLabel, CATEGORIES } from '../../utils/classify';
 import type { TaggedRepo, LlmProvider } from '../../utils/types';
-import { fullSync } from '../../utils/sync';
-import { analyzeRepo, fetchReadmeSummary, validateLlmConfig, getProviderDefaults } from '../../utils/llm';
-import { fullBatchAnalysis } from '../../utils/batchAiClassifier';
-import { getCategoryInfo, getSubCategoryLabel, CATEGORIES, getConfidenceColor, getConfidenceLabel } from '../../utils/classify';
-import type { TaggedRepo, LlmProvider, BatchClassificationResult, TopicCluster } from '../../utils/types';
-
 import TagBadge from '../../components/TagBadge';
 
 type PanelTab = 'repos' | 'ai' | 'settings';
@@ -42,14 +36,6 @@ export default function SidePanelApp() {
   // AI
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
-
-  // v1.2: Batch AI analysis
-  const [batchAnalyzing, setBatchAnalyzing] = useState(false);
-  const [batchResults, setBatchResults] = useState<{
-    summary: string;
-    clusters: TopicCluster[];
-    result: BatchClassificationResult;
-  } | null>(null);
 
   // Settings
   const [githubToken, setGithubToken] = useState('');
@@ -162,15 +148,6 @@ export default function SidePanelApp() {
 
   // ─── Sync (with concurrency guard) ────────────────────
   const [isSyncing, setIsSyncing] = useState(false);
-  /** Reclassify a single repo */
-  const handleReclassify = async (repoId: number) => {
-    const { reclassifyRepo } = await import('../../utils/db');
-    await reclassifyRepo(repoId);
-    await loadData();
-  };
-
-  // ─── Sync ────────────────────────────────────────────
-
 
   const handleSync = async () => {
     if (isSyncing) return;
@@ -225,41 +202,6 @@ export default function SidePanelApp() {
     setAiAnalyzing(false);
     setTimeout(() => setAiStatus(null), 5000);
   };
-
-  const handleApplyAi = async (repoId: number, tags: string[]) => {
-    await addTagsToRepo(repoId, tags);
-    setAiSuggestions((prev) => {
-      const next = new Map(prev);
-      next.delete(repoId);
-      return next;
-    });
-    await loadData();
-  };
-
-  // v1.2: Batch AI analysis — holistic classification of ALL repos
-  const handleFullBatchAnalysis = async () => {
-    const s = await getSettings();
-    if (!s.llm.apiKey) {
-      setAiStatus('Configure AI provider in Settings first');
-      return;
-    }
-    setBatchAnalyzing(true);
-    setBatchResults(null);
-    try {
-      const { summary, clusters, result, applied } = await fullBatchAnalysis(s.llm, (status) => {
-        setAiStatus(status);
-      });
-      setBatchResults({ summary, clusters, result });
-      setAiStatus(summary);
-      await loadData();
-    } catch (err) {
-      setAiStatus('✗ Batch analysis failed: ' + (err instanceof Error ? err.message : 'Unknown error'));
-    } finally {
-      setBatchAnalyzing(false);
-      setTimeout(() => { if (!batchAnalyzing) setAiStatus(null); }, 10000);
-    }
-  };
-
 
   // ─── Settings ────────────────────────────────────────
 
@@ -424,9 +366,6 @@ export default function SidePanelApp() {
                     onAddTags={handleAddTags}
                     onRemoveTag={handleRemoveTag}
                     onApplyAi={(_id, _tags) => {}}
-                    onApplyAi={handleApplyAi}
-                    onReclassify={handleReclassify}
-
                   />
                 ))}
               </div>
@@ -445,22 +384,10 @@ export default function SidePanelApp() {
               Analyze untagged repos with an LLM to automatically suggest tags.
             </p>
 
-            {/* v1.2: Smart Batch Analysis (holistic) */}
-            <button onClick={handleFullBatchAnalysis} disabled={batchAnalyzing}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors text-sm font-medium">
-              <HiSparkles className="w-5 h-5" />
-              {batchAnalyzing ? 'Analyzing...' : '🤖 Smart Batch Analysis'}
-            </button>
-            <p className="text-xs text-gray-400 text-center -mt-2">
-              Analyzes ALL repos holistically — finds clusters, reclassifies miscategorized, suggests new categories
-            </p>
-
             <button onClick={handleAiBatch} disabled={aiAnalyzing}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors text-sm font-medium">
               <HiSparkles className="w-5 h-5" />
               {aiAnalyzing ? 'Classifying...' : `AI Classify Uncategorized Repos`}
-              {aiAnalyzing ? 'Analyzing...' : `AI Classify ${untaggedCount} Untagged Repos (per-repo)`}
-
             </button>
 
             {aiStatus && (
@@ -468,68 +395,6 @@ export default function SidePanelApp() {
                 aiStatus.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'
               }`}>{aiStatus}</div>
             )}
-
-            {/* v1.2: Batch Analysis Results */}
-            {batchResults && (
-              <div className="space-y-3">
-                <div className="px-3 py-2 bg-indigo-50 rounded-lg border border-indigo-200">
-                  <p className="text-xs font-medium text-indigo-800">{batchResults.summary}</p>
-                </div>
-
-                {batchResults.result.proposedCategories.length > 0 && (
-                  <div className="space-y-2">
-                    <h3 className="text-xs font-semibold text-indigo-600">📂 Proposed New Categories</h3>
-                    {batchResults.result.proposedCategories.map((pc) => (
-                      <div key={pc.key} className="p-3 bg-green-50 rounded-lg border border-green-200">
-                        <p className="text-xs font-medium text-green-800">{pc.key}: {pc.repos.length} repos</p>
-                        <p className="text-[10px] text-green-600 mt-0.5">{pc.reason}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {batchResults.result.reclassifications.length > 0 && (
-                  <div className="space-y-2">
-                    <h3 className="text-xs font-semibold text-amber-600">🔄 Reclassifications</h3>
-                    {batchResults.result.reclassifications.slice(0, 10).map((re, i) => (
-                      <div key={i} className="p-2 bg-amber-50 rounded-lg border border-amber-200">
-                        <p className="text-xs font-medium text-amber-800 truncate">{re.fullName}</p>
-                        <p className="text-[10px] text-amber-600">{re.fromCategory} → {re.toCategory}</p>
-                        <p className="text-[10px] text-amber-500">{re.reason}</p>
-                      </div>
-                    ))}
-                    {batchResults.result.reclassifications.length > 10 && (
-                      <p className="text-[10px] text-gray-400 text-center">+{batchResults.result.reclassifications.length - 10} more</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {aiSuggestions.size > 0 && (
-              <div className="space-y-2">
-                <h3 className="text-xs font-semibold text-gray-600">Pending Suggestions</h3>
-                {[...aiSuggestions.entries()].map(([repoId, tags]) => {
-                  const repo = repos.find((r) => r.id === repoId);
-                  if (!repo) return null;
-                  return (
-                    <div key={repoId} className="p-3 bg-purple-50 rounded-lg border border-purple-200">
-                      <p className="text-xs font-medium text-purple-800 truncate">{repo.fullName}</p>
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {tags.map((t) => (
-                          <span key={t} className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">{t}</span>
-                        ))}
-                      </div>
-                      <button onClick={() => handleApplyAi(repoId, tags)}
-                        className="mt-2 text-xs px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors">
-                        Apply Tags
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
           </div>
         )}
 
@@ -619,18 +484,16 @@ export default function SidePanelApp() {
 // ─── RepoRow component (compact side-panel card) ─────────
 
 function RepoRow({
-  repo, aiSuggestion, onAddTags, onRemoveTag, onApplyAi, onReclassify,
+  repo, aiSuggestion, onAddTags, onRemoveTag, onApplyAi,
 }: {
   repo: TaggedRepo;
   aiSuggestion: string[] | null;
   onAddTags: (id: number, tags: string[]) => void;
   onRemoveTag: (id: number, tag: string) => void;
   onApplyAi: (id: number, tags: string[]) => void;
-  onReclassify?: (id: number) => Promise<void>;
 }) {
   const [showInput, setShowInput] = useState(false);
   const [tagInput, setTagInput] = useState('');
-  const [reclassifying, setReclassifying] = useState(false);
 
   const handleAdd = () => {
     const tags = tagInput.split(/[,;，；\s]+/).map((t) => t.trim()).filter(Boolean);
@@ -660,7 +523,7 @@ function RepoRow({
             <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{repo.description}</p>
           )}
 
-          {/* v1.2: Category badge with confidence */}
+          {/* v1.1: Category badge */}
           {catInfo && (
             <div className="flex items-center gap-1 mt-1">
               <TagBadge
@@ -671,24 +534,6 @@ function RepoRow({
               />
               {subLabel && (
                 <span className="text-[10px] text-gray-400">→ {subLabel}</span>
-              )}
-              {/* Confidence indicator */}
-              {repo.classificationConfidence !== undefined && (
-                <span className={`text-[9px] font-medium ${getConfidenceColor(repo.classificationConfidence)}`}>
-                  {repo.classificationConfidence}%
-                </span>
-              )}
-            </div>
-          )}
-          {!catInfo && repo.category === 'uncategorized' && (
-            <div className="flex items-center gap-1 mt-1">
-              <TagBadge tag="uncategorized" category="uncategorized" size="sm" />
-              {onReclassify && (
-                <button onClick={async () => { setReclassifying(true); await onReclassify(repo.id); setReclassifying(false); }}
-                  disabled={reclassifying}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors">
-                  {reclassifying ? '...' : 'Reclassify'}
-                </button>
               )}
             </div>
           )}
