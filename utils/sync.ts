@@ -42,7 +42,7 @@ export async function fullSync(token: string): Promise<{
 
     let tags = existing?.tags ?? [];
 
-    // v1.1: Auto-classify into 5 standard categories (always runs)
+    // v1.2: Auto-classify into 5 standard categories with confidence
     const catResult = classifyRepo({
       name: raw.name,
       fullName: raw.fullName,
@@ -52,10 +52,11 @@ export async function fullSync(token: string): Promise<{
     });
     const category = catResult.category;
     const subCategory = catResult.subCategory;
+    const classificationConfidence = catResult.confidence;
 
     // Apply auto-classify rules (custom tags) if enabled
     if (settings.autoClassifyEnabled) {
-      const autoTags = await applyAutoRules({ ...raw, tags: [], lastSyncedAt: 0 });
+      const autoTags = await applyAutoRules({ ...raw, tags: [], category: category, subCategory: subCategory, classificationConfidence, lastSyncedAt: 0 });
       if (autoTags.length > 0) {
         const tagSet = new Set([...tags, ...autoTags]);
         tags = [...tagSet];
@@ -69,13 +70,21 @@ export async function fullSync(token: string): Promise<{
       tags = [...tagSet];
     }
 
-    await db.repos.put({ ...raw, tags, category, subCategory, lastSyncedAt: Date.now() }, raw.id);
+    await db.repos.put({ ...raw, tags, category, subCategory, classificationConfidence, lastSyncedAt: Date.now() }, raw.id);
   }
 
   // ─── LLM auto-classify for new repos ───────────────────
   if (settings.llm.autoClassifyNew && settings.llm.apiKey && newCount > 0) {
     for (const raw of rawRepos) {
-      const tagged: TaggedRepo = { ...raw, tags: [], category: category || '', subCategory: subCategory || '', lastSyncedAt: 0 };
+      // Reclassify the raw repo for the LLM analysis context
+      const llmCatResult = classifyRepo({
+        name: raw.name,
+        fullName: raw.fullName,
+        description: raw.description || '',
+        language: raw.language || '',
+        topics: raw.topics,
+      });
+      const tagged: TaggedRepo = { ...raw, tags: [], category: llmCatResult.category || '', subCategory: llmCatResult.subCategory || '', classificationConfidence: llmCatResult.confidence, lastSyncedAt: 0 };
       try {
         const readmeSummary = await fetchReadmeSummary(tagged);
         const suggestion = await analyzeRepo(tagged, readmeSummary, settings.llm);

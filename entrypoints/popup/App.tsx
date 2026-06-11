@@ -4,8 +4,9 @@ import { db, getSettings, updateSettings, getAiCache, setAiCache, getUnanalyzedR
 import { getAllTags, addTagsToRepo, removeTagsFromRepo, bulkTagRepos } from '../../utils/tags';
 import { fullSync } from '../../utils/sync';
 import { analyzeRepo, fetchReadmeSummary, validateLlmConfig, getProviderDefaults } from '../../utils/llm';
+import { fullBatchAnalysis } from '../../utils/batchAiClassifier';
 import { CATEGORIES } from '../../utils/classify';
-import type { TaggedRepo, LlmProvider, LlmSettings } from '../../utils/types';
+import type { TaggedRepo, LlmProvider, LlmSettings, BatchClassificationResult, TopicCluster } from '../../utils/types';
 import FilterBar from '../../components/FilterBar';
 import SyncStatus from '../../components/SyncStatus';
 import RepoList from '../../components/RepoList';
@@ -48,6 +49,7 @@ export default function PopupApp() {
   const [llmAutoNew, setLlmAutoNew] = useState(false);
   const [llmCustomPrompt, setLlmCustomPrompt] = useState('');
   const [llmValidating, setLlmValidating] = useState(false);
+  const [batchAnalyzing, setBatchAnalyzing] = useState(false);
   const [llmStatus, setLlmStatus] = useState<{ ok: boolean; message: string } | null>(null);
 
   const loadData = useCallback(async () => {
@@ -153,6 +155,27 @@ export default function PopupApp() {
   const handleApplyAiSuggestion = async (repoId: number, tags: string[]) => {
     await addTagsToRepo(repoId, tags);
     await loadData();
+  };
+
+  // v1.2: Batch AI analysis
+  const handleBatchAnalysis = async () => {
+    const s = await getSettings();
+    if (!s.llm.apiKey) {
+      alert('Configure AI provider in Settings first');
+      return;
+    }
+    setBatchAnalyzing(true);
+    try {
+      const { summary } = await fullBatchAnalysis(s.llm, (status) => {
+        console.log('[BatchAI]', status);
+      });
+      alert(summary);
+      await loadData();
+    } catch (err) {
+      alert('Batch analysis failed: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setBatchAnalyzing(false);
+    }
   };
 
   // ─── LLM settings ─────────────────────────────────────
@@ -305,6 +328,14 @@ export default function PopupApp() {
               uncategorizedCount={uncategorizedCount}
             />
             <ExportImport onImportComplete={loadData} />
+            {/* v1.2: Batch AI analysis button */}
+            {repos.length > 0 && (
+              <button onClick={handleBatchAnalysis} disabled={batchAnalyzing}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors text-xs font-medium">
+                <HiSparkles className="w-4 h-4" />
+                {batchAnalyzing ? 'Analyzing all repos...' : '🤖 Smart Batch Analysis (holistic)'}
+              </button>
+            )}
             <AiAnalyzer
               repos={repos}
               onApplySuggestion={handleApplyAiSuggestion}

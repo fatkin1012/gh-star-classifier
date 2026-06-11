@@ -17,6 +17,8 @@ export default function OptionsApp() {
 
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
+  const [lowConfidenceCount, setLowConfidenceCount] = useState(0);
+  const [totalRepoCount, setTotalRepoCount] = useState(0);
 
   useEffect(() => {
     loadRules();
@@ -24,6 +26,15 @@ export default function OptionsApp() {
     getCategoryStats().then((s) => {
       setCategoryCounts(s.categoryCounts);
       setUncategorizedCount(s.uncategorized);
+    });
+    // v1.2: Count low-confidence repos
+    db.repos.toArray().then((all) => {
+      setTotalRepoCount(all.length);
+      const low = all.filter((r) => {
+        const conf = r.classificationConfidence;
+        return conf !== undefined && conf > 0 && conf < 40;
+      }).length;
+      setLowConfidenceCount(low);
     });
   }, []);
 
@@ -91,10 +102,18 @@ export default function OptionsApp() {
       {/* v1.1: Classification Overview */}
       {Object.keys(categoryCounts).length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-lg font-semibold text-gray-700">📂 Auto-Classification (v1.1)</h2>
+          <h2 className="text-lg font-semibold text-gray-700">📂 Auto-Classification (v1.2)</h2>
           <p className="text-xs text-gray-500">
-            Repos are auto-classified into 5 standard categories during every sync.
+            Repos are auto-classified into 5 standard categories during every sync. Confidence shown where available.
           </p>
+
+          {/* Quality summary */}
+          <div className="flex gap-2 text-xs">
+            <span className="text-green-600">✓ {totalRepoCount - uncategorizedCount - lowConfidenceCount} well-classified</span>
+            {lowConfidenceCount > 0 && <span className="text-yellow-600">⚠ {lowConfidenceCount} low confidence</span>}
+            {uncategorizedCount > 0 && <span className="text-red-500">✗ {uncategorizedCount} uncategorized</span>}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {CATEGORIES.map((cat) => {
               const count = categoryCounts[cat.key] || 0;
