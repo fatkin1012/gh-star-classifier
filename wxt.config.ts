@@ -10,7 +10,7 @@ export default defineConfig({
   manifest: {
     name: 'GitHub Star Classifier',
     description: 'Organize, tag, and classify your GitHub starred repos',
-    version: '1.5.0',
+    version: '1.6.0',
     action: {
       default_title: 'Star Classifier',
     },
