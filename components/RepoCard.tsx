@@ -6,6 +6,10 @@ import TagInput from './TagInput';
 import { getSettings, getAiCache, setAiCache } from '../utils/db';
 import { classifyRepoWithLLM, fetchReadmeSummary } from '../utils/llm';
 import { classifyRepoSync, getCategoryInfo, getSubCategoryLabel } from '../utils/classify';
+import { getSettings, getAiCache, setAiCache, reclassifyRepo } from '../utils/db';
+import { analyzeRepo, fetchReadmeSummary } from '../utils/llm';
+import { getCategoryInfo, getSubCategoryLabel, getConfidenceColor, getConfidenceLabel } from '../utils/classify';
+
 
 interface RepoCardProps {
   repo: TaggedRepo;
@@ -20,6 +24,7 @@ interface RepoCardProps {
 export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, selected, onSelect, onAiSuggest }: RepoCardProps) {
   const [showTagInput, setShowTagInput] = useState(false);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [reclassifying, setReclassifying] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string[] | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -79,6 +84,22 @@ export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, select
   const existingTagSet = new Set(repo.tags);
   const newAiTags = aiSuggestion?.filter((t) => !existingTagSet.has(t)) ?? [];
 
+  // v1.2: Reclassify with confidence
+  const handleReclassify = async () => {
+    setReclassifying(true);
+    try {
+      await reclassifyRepo(repo.id);
+      // Force re-render via parent callback by calling onAddTags with empty array
+      // (the parent will reload data)
+    } catch (err) {
+      console.error('Reclassification failed:', err);
+    } finally {
+      setReclassifying(false);
+    }
+  };
+
+  const confidence = repo.classificationConfidence ?? 0;
+
   return (
     <div
       className={`p-3 rounded-lg border transition-all ${
@@ -124,7 +145,7 @@ export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, select
             <p className="text-xs text-gray-600 mt-1 line-clamp-2">{repo.description}</p>
           )}
 
-          {/* v1.1: Category badge */}
+          {/* v1.2: Category badge with confidence */}
           {repo.category && repo.category !== 'uncategorized' ? (
             (() => {
               const catInfo = getCategoryInfo(repo.category);
@@ -140,12 +161,35 @@ export default function RepoCard({ repo, allTags, onAddTags, onRemoveTag, select
                   {subLabel && (
                     <span className="text-[11px] text-gray-400">→ {subLabel}</span>
                   )}
+                  {/* Confidence indicator */}
+                  <span className={`text-[10px] font-medium ${getConfidenceColor(confidence)}`}>
+                    {getConfidenceLabel(confidence)} ({confidence}%)
+                  </span>
+                  {/* Reclassify button */}
+                  <button
+                    onClick={handleReclassify}
+                    disabled={reclassifying}
+                    className="text-[10px] flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                    title="Reclassify this repo"
+                  >
+                    <HiArrowPath className={`w-3 h-3 ${reclassifying ? 'animate-spin' : ''}`} />
+                    Reclassify
+                  </button>
                 </div>
               );
             })()
           ) : repo.category === 'uncategorized' ? (
-            <div className="mt-1.5">
+            <div className="mt-1.5 flex items-center gap-1.5">
               <TagBadge tag="uncategorized" category="uncategorized" size="sm" />
+              <button
+                onClick={handleReclassify}
+                disabled={reclassifying}
+                className="text-[10px] flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                title="Reclassify this repo"
+              >
+                <HiArrowPath className={`w-3 h-3 ${reclassifying ? 'animate-spin' : ''}`} />
+                Reclassify
+              </button>
             </div>
           ) : null}
 
